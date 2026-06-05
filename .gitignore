@@ -3,7 +3,8 @@ node_modules/
 dist/
 coverage/
 .env
-.env.*
 !.env.example
+.claude/
+.context/
 npm-debug.log*
 pnpm-debug.log*

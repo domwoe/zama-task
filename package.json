@@ -12,8 +12,9 @@
     "dev": "ponder dev",
     "typecheck": "tsc --noEmit --pretty false",
     "lint": "eslint .",
+    "test": "vitest run",
     "ponder:codegen": "ponder codegen",
-    "check": "pnpm run ponder:codegen && pnpm run typecheck && pnpm run lint",
+    "check": "pnpm run ponder:codegen && pnpm run typecheck && pnpm run lint && pnpm run test",
     "reset:local-db": "rm -rf ./.ponder/pglite"
   },
   "devDependencies": {
@@ -24,7 +25,8 @@
     "@types/semver": "^7.7.1",
     "eslint": "^10.4.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.60.1"
+    "typescript-eslint": "^8.60.1",
+    "vitest": "^4.1.8"
   },
   "dependencies": {
     "@zama-fhe/sdk": "^3.1.0-alpha.4",

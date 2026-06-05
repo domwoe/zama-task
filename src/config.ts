@@ -31,9 +31,24 @@ export const parseStartBlock = (value: string | undefined): number | "latest" =>
   return block;
 };
 
+export const requireIndexerPrivateKey = (): `0x${string}` => {
+  const privateKey = process.env.INDEXER_PRIVATE_KEY;
+
+  if (privateKey === undefined || privateKey.length === 0) {
+    throw new Error("INDEXER_PRIVATE_KEY is required for the real Zama decryptor");
+  }
+
+  if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
+    throw new Error("INDEXER_PRIVATE_KEY must be a 32-byte hex private key");
+  }
+
+  return privateKey as `0x${string}`;
+};
+
 export const env = {
   aclAddress: normalizeAddress(process.env.FHEVM_ACL_ADDRESS),
   indexerAddress: normalizeAddress(process.env.INDEXER_ADDRESS),
+  relayerApiKey: process.env.RELAYER_API_KEY,
   rpcUrl: process.env.SEPOLIA_RPC_URL ?? "http://127.0.0.1:8545",
   startBlock: parseStartBlock(process.env.START_BLOCK),
   tokenAddress: normalizeAddress(process.env.TOKEN_ADDRESS),

@@ -128,12 +128,12 @@ where the worker has its own connection and a plain `decryptions` table.
 - **Done when:** events persist as rows with correct `kind`; zero decryption in handlers.
 
 ## Phase 3 — Decryptor seam & SDK integration — `D5`, `D6`, `D8`
-- [ ] Define `Decryptor` interface — both methods **delegated** (the indexer signs; the param is the delegator/holder whose right is used): `decryptTransferAmountAs(handle, delegator)` and `decryptBalanceAs(holder)`, surfacing typed outcomes. Candidate selection (which party to use) is the drainer's job (P4), not the interface's — `D5`, `D6`, `D8`
-- [ ] Real impl over `@zama-fhe/sdk`: `createConfig` (viem + Sepolia preset + node transport), `GenericStorage` backed by the DB table (not `MemoryStorage`) — `D6`
-- [ ] Delegated decrypt via the SDK `decryptBalanceAs` / user-decrypt path, indexer signs with its own key — `D6`
-- [ ] Map `ZamaError` → internal outcome classes via `matchZamaError` (`DelegationNotFound`, `…Expired`, `…NotPropagated`, `RelayerRequestFailed`+`statusCode`, `AclPaused`, keypair, `DecryptionFailed`) — `D8`
-- [ ] Fake impl: delegation set + `handle → allowedAccounts` predicate; can throw `DelegationNotPropagated` N times to mirror lag — `D6`
-- [ ] Commit the phase with a state-of-the-art, expressive git message.
+- [x] Define `Decryptor` interface — both methods **delegated** (the indexer signs; the param is the delegator/holder whose right is used): `decryptTransferAmountAs(handle, delegator)` and `decryptBalanceAs(holder)`, surfacing typed outcomes. Candidate selection (which party to use) is the drainer's job (P4), not the interface's — `D5`, `D6`, `D8`
+- [x] Real impl over `@zama-fhe/sdk`: `createConfig` (viem + Sepolia preset + node transport), `GenericStorage` backed by the DB table (not `MemoryStorage`) — `D6`
+- [x] Delegated decrypt via the SDK `decryptBalanceAs` / user-decrypt path, indexer signs with its own key — `D6`
+- [x] Map `ZamaError` → internal outcome classes via `matchZamaError` (`DelegationNotFound`, `…Expired`, `…NotPropagated`, `RelayerRequestFailed`+`statusCode`, `AclPaused`, keypair, `DecryptionFailed`) — `D8`
+- [x] Fake impl: delegation set + `handle → allowedAccounts` predicate; can throw `DelegationNotPropagated` N times to mirror lag — `D6`
+- [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** real and fake both satisfy the interface; fake predicate unit-tested.
 
 ## Phase 4 — Decryption drainer — `D2`, `D8`, `D3`
@@ -251,3 +251,12 @@ where the worker has its own connection and a plain `decryptions` table.
 - TODO: `UnwrapFinalized.cleartextAmount` is currently stored as emitted. The
   `rate()` conversion for underlying-vs-wrapped units is still open and should be
   handled before considering the unshield propagation bullet complete.
+- Phase 3 SDK lookup: Context7 only resolved the legacy `/zama-ai/relayer-sdk`, so
+  SDK integration was based on the proper `zama-ai/sdk` `prerelease` branch
+  (`examples/node-viem/WALKTHROUGH.md`) plus the installed
+  `@zama-fhe/sdk@3.1.0-alpha.4` type declarations.
+- Phase 3 added `vitest` and `pnpm test`; `pnpm run check` now includes the fake
+  decryptor predicate tests.
+- Phase 3's SDK storage is a persistent `GenericStorage` adapter over the
+  `sdk_credentials` store shape. The concrete in-process PGlite connection wiring
+  is still part of the P4 drainer/runtime integration.
