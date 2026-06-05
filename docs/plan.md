@@ -187,6 +187,14 @@ where the worker has its own connection and a plain `decryptions` table.
 - [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** end-to-end on Sepolia shows a row flip `pending/unauthorized → decrypted` after the grant.
 
+## Phase 9 — Light tests
+- [x] Happy path: fake indexed transfer + fake drainer + API response shows decrypted cleartext — `D2`, `D6`, `D7`
+- [x] Negative path: undelegated/unauthorized event is preserved and exposed through the API, not dropped — `D2`, `D6`, `D7`
+- [x] API serialization unit coverage for cursor round-trip, disclosed amounts, and retryable undecrypted statuses — API §transfers, API §amount
+- [x] Preserve existing balance/drainer/API tests while adding the fake flow coverage.
+- [x] Verify with `pnpm run check` equivalent: `ponder codegen`, `tsc --noEmit`, `eslint`, `vitest run`.
+- [ ] Commit the phase with a state-of-the-art, expressive git message.
+- **Done when:** offline tests cover one event-to-cleartext API happy path and one undecryptable event retention path.
 
 ---
 
@@ -194,7 +202,7 @@ where the worker has its own connection and a plain `decryptions` table.
 - [ ] Indexer watches one ERC-7984, decrypts entitled amounts, **preserves** undecryptable events, **backfills** on later grant — `D2`/`D6`/`D7`
 - [ ] Read API: current balance, transfer history with cleartext where available, health + how-far-behind — `API.md`
 - [ ] `DECISIONS.md` complete and defensible — Phase 10
-- [ ] Light tests: one happy path + one negative — Phase 9
+- [x] Light tests: one happy path + one negative — Phase 9
 - [ ] Reflection, SDK feedback, AI assistance — Phase 10
 
 ## Open (tracked, non-blocking)
@@ -274,3 +282,10 @@ where the worker has its own connection and a plain `decryptions` table.
   exposes wrapper operations through `sdk.createWrappedToken(...)`, while
   delegation lives under `sdk.delegations`. Scripts are typechecked but not run
   against Sepolia here because the workspace has no real toy key/RPC/token values.
+- Phase 9 added an offline fake-indexer flow that runs a `DrainerTransfer`
+  through `DecryptionDrainer` and the Hono API factory. The happy path proves the
+  delegated `userDecrypt` result serializes as cleartext; the negative path proves
+  unauthorized encrypted events remain visible in transfer history.
+- Phase 9 verification used the local binaries equivalent to `pnpm run check`
+  because Corepack/pnpm has been network-flaky in the sandbox:
+  `ponder codegen`, `tsc --noEmit`, `eslint .`, and `vitest run` all passed.
