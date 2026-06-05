@@ -180,11 +180,11 @@ where the worker has its own connection and a plain `decryptions` table.
 - **Done when:** health reflects real lag and backlog; returns 503 under the defined unhealthy conditions.
 
 ## Phase 8 — Seed & demo scripts — `D6`, `D7`
-- [ ] Script: holder shields / confidential-transfers on Sepolia (SDK) to generate events — `D6`, `D7`
-- [ ] Grant delegation to the indexer: `sdk.delegations.delegateDecryption(...)` **or** the `cast` one-liner — `D6`
-- [ ] Optional revoke script — `D6`
-- [ ] Document the demo arc in README: transfer → see `unauthorized` → grant → see `decrypted` (note 1–2 min propagation) — brief DX
-- [ ] Commit the phase with a state-of-the-art, expressive git message.
+- [x] Script: holder shields / confidential-transfers on Sepolia (SDK) to generate events — `D6`, `D7`
+- [x] Grant delegation to the indexer: `sdk.delegations.delegateDecryption(...)` **or** the `cast` one-liner — `D6`
+- [x] Optional revoke script — `D6`
+- [x] Document the demo arc in README: transfer → see `unauthorized` → grant → see `decrypted` (note 1–2 min propagation) — brief DX
+- [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** end-to-end on Sepolia shows a row flip `pending/unauthorized → decrypted` after the grant.
 
 
@@ -269,3 +269,8 @@ where the worker has its own connection and a plain `decryptions` table.
   Ponder's public client, and keeps decryption backlog/breaker state as a separate
   signal from the raw-SQL side tables. Breaker-open or very stale backlog returns
   `503`; softer lag/backlog/failure signals return `degraded` with HTTP `200`.
+- Phase 8 demo scripts were based on the proper `zama-ai/sdk` `prerelease`
+  `examples/node-viem/WALKTHROUGH.md` and alpha package types. The installed SDK
+  exposes wrapper operations through `sdk.createWrappedToken(...)`, while
+  delegation lives under `sdk.delegations`. Scripts are typechecked but not run
+  against Sepolia here because the workspace has no real toy key/RPC/token values.

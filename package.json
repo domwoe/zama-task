@@ -15,7 +15,10 @@
     "test": "vitest run",
     "ponder:codegen": "ponder codegen",
     "check": "pnpm run ponder:codegen && pnpm run typecheck && pnpm run lint && pnpm run test",
-    "reset:local-db": "rm -rf ./.ponder/pglite"
+    "reset:local-db": "rm -rf ./.ponder/pglite",
+    "demo:seed": "node --experimental-strip-types scripts/demo-seed.ts",
+    "demo:delegate": "node --experimental-strip-types scripts/delegate-indexer.ts",
+    "demo:revoke": "node --experimental-strip-types scripts/revoke-indexer.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
