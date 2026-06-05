@@ -1,7 +1,7 @@
 import { eq } from "ponder";
 import { ponder } from "ponder:registry";
 import { delegations, transfers, unwraps } from "ponder:schema";
-import { zeroAddress } from "viem";
+import { getAddress, zeroAddress } from "viem";
 
 import { confidentialTokenWithWrapperAbi } from "./abi/confidential-token.js";
 import { underlyingToWrappedRaw } from "./balance/rate.js";
@@ -30,6 +30,10 @@ const transferKind = (from: `0x${string}`, to: `0x${string}`): TransferKind => {
   }
 
   return "transfer";
+};
+
+const sameAddress = (left: `0x${string}`, right: `0x${string}`): boolean => {
+  return getAddress(left) === getAddress(right);
 };
 
 ponder.on("ConfidentialToken:ConfidentialTransfer", async ({ event, context }) => {
@@ -132,7 +136,14 @@ ponder.on("ConfidentialToken:UnwrapFinalized", async ({ event, context }) => {
 });
 
 ponder.on("FhevmAcl:DelegatedForUserDecryption", async ({ event, context }) => {
+  // contractAddress is non-indexed, so the log filter can't scope it — only keep
+  // delegations granted for the token this indexer watches.
+  if (!sameAddress(event.args.contractAddress, env.tokenAddress)) {
+    return;
+  }
+
   const id = delegationId(event.args.delegator, event.args.delegate, event.args.contractAddress);
+  const expiry = event.args.newExpirationDate;
 
   await context.db
     .insert(delegations)
@@ -141,14 +152,14 @@ ponder.on("FhevmAcl:DelegatedForUserDecryption", async ({ event, context }) => {
       delegator: event.args.delegator,
       delegate: event.args.delegate,
       contractAddress: event.args.contractAddress,
-      expiry: event.args.expiry,
+      expiry,
       lastEventBlock: event.block.number,
     })
     .onConflictDoUpdate({
       delegator: event.args.delegator,
       delegate: event.args.delegate,
       contractAddress: event.args.contractAddress,
-      expiry: event.args.expiry,
+      expiry,
       lastEventBlock: event.block.number,
     });
 });

@@ -178,6 +178,54 @@ describe("fake indexer flow", () => {
     });
   });
 
+  it("backfills cleartext after ACL delegation is granted post-index", async () => {
+    const row = transfer();
+    const store = new InMemoryDrainerStore({ transfers: [row] });
+    const decryptor = new FakeDecryptor({
+      handles: new Map([
+        [handle, { cleartext: 12_000_000n, allowedAccounts: new Set<Address>([recipient]) }],
+      ]),
+      // No delegatedAccounts yet — simulates indexer having no decrypt rights at index time
+    });
+    const drainer = new DecryptionDrainer({
+      store,
+      decryptor,
+      indexerAddress,
+      tokenAddress,
+      relayerMinDelayMs: 0,
+      now: () => now,
+    });
+
+    // Phase 1: drainer runs with no delegation → transfer stays unauthorized, not dropped
+    await drainer.processOnce();
+
+    const app = createApp(new FlowRepository(store, [row]));
+    const responseBefore = await app.request(`/v1/addresses/${recipient}/transfers`);
+    const bodyBefore = await responseBefore.json() as {
+      readonly data: readonly [{ readonly id: string; readonly amount: { readonly status: string; readonly raw: null } }];
+    };
+    expect(bodyBefore.data).toHaveLength(1);
+    expect(bodyBefore.data[0]).toMatchObject({ id: row.id, amount: { status: "unauthorized", raw: null } });
+
+    // Phase 2: holder grants ACL delegation → both store (on-chain state) and decryptor (relayer) updated.
+    // nudgeUnauthorizedForActiveDelegations at the start of processOnce resets nextAttemptAt from the
+    // far-future backstop to now, making the row immediately eligible for the work query.
+    store.addDelegation(delegation());
+    decryptor.grantDelegation(recipient);
+    await drainer.processOnce();
+
+    const responseAfter = await app.request(`/v1/addresses/${recipient}/transfers`);
+    const bodyAfter = await responseAfter.json() as {
+      readonly data: readonly [{ readonly amount: { readonly status: string; readonly raw: string; readonly value: string } }];
+    };
+    expect(bodyAfter.data[0].amount).toEqual({
+      status: "decrypted",
+      raw: "12000000",
+      value: "12.0",
+      source: "userDecrypt",
+    });
+  });
+
   it("retains unauthorized events in the API instead of dropping them", async () => {
     const row = transfer();
     const store = new InMemoryDrainerStore({

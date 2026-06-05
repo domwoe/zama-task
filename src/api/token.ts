@@ -1,5 +1,5 @@
 export interface TokenMetadata {
-  readonly chainId: 11155111;
+  readonly chainId: number;
   readonly address: `0x${string}`;
   readonly name: string;
   readonly symbol: string;

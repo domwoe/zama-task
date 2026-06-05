@@ -64,9 +64,12 @@ export const requireIndexerPrivateKey = (): `0x${string}` => {
 
 export const env = {
   aclAddress: normalizeAddress(process.env.FHEVM_ACL_ADDRESS),
+  chainId: parsePositiveInteger(process.env.CHAIN_ID, SEPOLIA_CHAIN_ID, "CHAIN_ID"),
   decryptBatchSize: parsePositiveInteger(process.env.DECRYPT_BATCH_SIZE, 25, "DECRYPT_BATCH_SIZE"),
   decryptConcurrency: parsePositiveInteger(process.env.DECRYPT_CONCURRENCY, 4, "DECRYPT_CONCURRENCY"),
   decryptPollMs: parsePositiveInteger(process.env.DECRYPT_POLL_MS, 5_000, "DECRYPT_POLL_MS"),
+  /** 'fake' uses FakeDecryptor with deterministic test handles; 'real' uses the Zama SDK. */
+  decryptorMode: (process.env.DECRYPTOR_MODE ?? "real") as "real" | "fake",
   indexerAddress: normalizeAddress(process.env.INDEXER_ADDRESS),
   relayerApiKey: process.env.RELAYER_API_KEY,
   rpcUrl: process.env.SEPOLIA_RPC_URL ?? "http://127.0.0.1:8545",

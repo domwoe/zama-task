@@ -96,6 +96,9 @@ export const confidentialTokenWithWrapperAbi = [
   ...confidentialWrapperAbi,
 ] as const;
 
+// Verified against the live Sepolia fhEVM ACL: only `delegator` and `delegate` are
+// indexed (topic0 = 0x527b025d…). `contractAddress` and the three uint64 dates are in
+// the data word, so they cannot be used in a Ponder log filter — see ponder.config.ts.
 export const aclAbi = [
   {
     type: "event",
@@ -103,9 +106,10 @@ export const aclAbi = [
     inputs: [
       { name: "delegator", type: "address", indexed: true },
       { name: "delegate", type: "address", indexed: true },
-      { name: "contractAddress", type: "address", indexed: true },
-      { name: "expiry", type: "uint64", indexed: false },
+      { name: "contractAddress", type: "address", indexed: false },
       { name: "delegationCounter", type: "uint64", indexed: false },
+      { name: "oldExpirationDate", type: "uint64", indexed: false },
+      { name: "newExpirationDate", type: "uint64", indexed: false },
     ],
   },
 ] as const;

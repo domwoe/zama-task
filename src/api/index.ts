@@ -1,15 +1,51 @@
 import { db, publicClients } from "ponder:api";
 
 import { confidentialTokenWithWrapperAbi } from "../abi/confidential-token.js";
-import { env, SEPOLIA_CHAIN_ID } from "../config.js";
+import { env } from "../config.js";
+import { FakeDecryptor } from "../decryptor/fake-decryptor.js";
 import { createRealZamaDecryptor } from "../decryptor/real-zama-decryptor.js";
 import { DecryptionDrainer, startDecryptionDrainer } from "../drainer/drainer.js";
 import { RawSqlSideTableRepository } from "./raw-sql-repository.js";
 import { createIndexerApi } from "./app.js";
 import type { TokenMetadata } from "./token.js";
 
+// Fixed handle and cleartext used by integration tests (DECRYPTOR_MODE=fake).
+// Any bytes32 value emitted by MockToken.emitTransfer will be recognised here.
+export const TEST_HANDLE =
+  "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as const;
+export const TEST_CLEARTEXT = 12_000_000n;
+
 const repository = new RawSqlSideTableRepository(db);
-const decryptor = createRealZamaDecryptor(repository);
+
+const decryptor =
+  env.decryptorMode === "fake"
+    ? new FakeDecryptor({
+        handles: new Map([
+          [
+            TEST_HANDLE,
+            {
+              cleartext: TEST_CLEARTEXT,
+              // All Anvil-funded test accounts are pre-authorised as delegators.
+              allowedAccounts: new Set([
+                "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+                "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+                "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+                "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+              ]),
+            },
+          ],
+        ]),
+        // delegatedAccounts mirrors allowedAccounts — the drainer already checks the
+        // on-chain delegation state via listActiveDelegators before calling decrypt,
+        // but FakeDecryptor requires the set to be non-empty to return success.
+        delegatedAccounts: new Set([
+          "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+          "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+          "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+          "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+        ]),
+      })
+    : createRealZamaDecryptor(repository);
 
 let tokenMetadataPromise: Promise<TokenMetadata> | undefined;
 
@@ -38,7 +74,7 @@ const loadTokenMetadata = async (): Promise<TokenMetadata> => {
   ]);
 
   return {
-    chainId: SEPOLIA_CHAIN_ID,
+    chainId: env.chainId,
     address: env.tokenAddress,
     name,
     symbol,
