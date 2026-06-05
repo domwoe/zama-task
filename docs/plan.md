@@ -115,16 +115,16 @@ where the worker has its own connection and a plain `decryptions` table.
 - **Done when:** schema compiles and types are exported from `ponder.schema.ts`.
 
 ## Phase 2 — Indexing handlers (write-only, never decrypt) — `D7`, `D6`, `D2`
-- [ ] Register token in `ponder.config` (`TOKEN_ADDRESS`, `START_BLOCK`, merged `IERC7984` + `IERC7984ERC20Wrapper` ABI) — `D7`
-- [ ] Register ACL contract with event filter `delegate == INDEXER_ADDR` — `D6`
-- [ ] `ConfidentialTransfer` → upsert `transfers` with chain facts + `amountHandle`; derive `kind` (`from==0`⇒shield, `to==0`⇒unshield-burn, else transfer). **No decryption fields** — those live in the drainer-owned `decryptions` (see §Stores); shield mints go through the decrypt path like any transfer (`D7`) — `D7`, `D2`
-- [ ] `AmountDisclosed` → set `disclosedRaw`/`disclosedSource='disclosed'` on the transfer row(s) matching the handle (in-handler, reorg-safe) — `D7`
-- [ ] `UnwrapRequested` → upsert `unwraps` (`status='requested'`, `amountHandle`); set `unwrapRequestId` on the linked unshield transfer — `D7`
+- [x] Register token in `ponder.config` (`TOKEN_ADDRESS`, `START_BLOCK`, merged `IERC7984` + `IERC7984ERC20Wrapper` ABI) — `D7`
+- [x] Register ACL contract with event filter `delegate == INDEXER_ADDR` — `D6`
+- [x] `ConfidentialTransfer` → upsert `transfers` with chain facts + `amountHandle`; derive `kind` (`from==0`⇒shield, `to==0`⇒unshield-burn, else transfer). **No decryption fields** — those live in the drainer-owned `decryptions` (see §Stores); shield mints go through the decrypt path like any transfer (`D7`) — `D7`, `D2`
+- [x] `AmountDisclosed` → set `disclosedRaw`/`disclosedSource='disclosed'` on the transfer row(s) matching the handle (in-handler, reorg-safe) — `D7`
+- [x] `UnwrapRequested` → upsert `unwraps` (`status='requested'`, `amountHandle`); set `unwrapRequestId` on the linked unshield transfer — `D7`
 - [ ] `UnwrapFinalized` → update `unwraps` by `unwrapRequestId` → `status='finalized'` + `cleartextRaw`; propagate `disclosedRaw` to the linked unshield transfer (apply `rate()` if underlying≠wrapped units) — `D7`
-- [ ] `OperatorSet` → index as metadata or skip (no amount) — `D7`
-- [ ] ACL `DelegatedForUserDecryption` → upsert `delegations` only. The backfill nudge lives in the drainer (P4), since it owns `decryptions`; handlers never touch the drainer store — `D6`
-- [ ] Confirm handlers never call the relayer and never write the drainer store; reorg-safety is structural (§Stores), not a per-write check — `D2`, `D7`
-- [ ] Commit the phase with a state-of-the-art, expressive git message.
+- [x] `OperatorSet` → index as metadata or skip (no amount) — `D7`
+- [x] ACL `DelegatedForUserDecryption` → upsert `delegations` only. The backfill nudge lives in the drainer (P4), since it owns `decryptions`; handlers never touch the drainer store — `D6`
+- [x] Confirm handlers never call the relayer and never write the drainer store; reorg-safety is structural (§Stores), not a per-write check — `D2`, `D7`
+- [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** events persist as rows with correct `kind`; zero decryption in handlers.
 
 ## Phase 3 — Decryptor seam & SDK integration — `D5`, `D6`, `D8`
@@ -245,3 +245,9 @@ where the worker has its own connection and a plain `decryptions` table.
 - Phase 1 has schema foundations committed: Ponder owns only reorg-tracked chain
   fact tables, while drainer-owned state is represented by separate SQL DDL/types.
   Balance derivation and health lag are intentionally still runtime work in P5/P7.
+- Phase 2's `UnwrapFinalized` handler upserts `unwraps` instead of assuming the
+  `UnwrapRequested` row exists, so indexing from a mid-stream `START_BLOCK` still
+  preserves finalized cleartext.
+- TODO: `UnwrapFinalized.cleartextAmount` is currently stored as emitted. The
+  `rate()` conversion for underlying-vs-wrapped units is still open and should be
+  handled before considering the unshield propagation bullet complete.
