@@ -151,12 +151,12 @@ where the worker has its own connection and a plain `decryptions` table.
 - **Done when:** against the fake, `encrypted→decrypted`, and `unauthorized→decrypted` after a delegation flip.
 
 ## Phase 5 — Balance derivation & checkpoint — `D7`
-- [ ] Balance is a **derived aggregate** (no mutable counter): `SUM(signed cleartext)` over the address's `transfers` LEFT JOIN cleartext (`disclosedRaw` ?? `decryptions.cleartextRaw`), signed by direction (in/mint `+`, out/burn `−`) — `D7`, §Stores, API §balance
-- [ ] Set `balance.status='partial'` + `pendingTransfers` when any contributing transfer lacks cleartext — `D7`, API §balance
+- [x] Balance is a **derived aggregate** (no mutable counter): `SUM(signed cleartext)` over the address's `transfers` LEFT JOIN cleartext (`disclosedRaw` ?? `decryptions.cleartextRaw`), signed by direction (in/mint `+`, out/burn `−`) — `D7`, §Stores, API §balance
+- [x] Set `balance.status='partial'` + `pendingTransfers` when any contributing transfer lacks cleartext — `D7`, API §balance
 - [ ] Optional: a `balances` cache row **recomputed** (not incremented) when an address's rows change — idempotent and reorg-safe — `D7`
-- [ ] Periodic checkpoint: `decryptBalanceAs(holder)` against `confidentialBalanceOf` to reconcile/detect drift and serve the `partial` fallback total — `D7`
+- [x] Periodic checkpoint: `decryptBalanceAs(holder)` against `confidentialBalanceOf` to reconcile/detect drift and serve the `partial` fallback total — `D7`
 - [ ] Handle wrapper `rate()` units when cross-filling shield/unshield cleartext — `D7`
-- [ ] Commit the phase with a state-of-the-art, expressive git message.
+- [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** balance endpoint returns the correct sum; `partial` shown when history is incomplete.
 
 ## Phase 6 — Read API — `D4` / `API.md`
@@ -269,3 +269,9 @@ where the worker has its own connection and a plain `decryptions` table.
   `insert`/`update`/`delete`), so the API-server startup/SQL adapter for the
   drainer-owned side tables remains unchecked until we wire an explicit raw-SQL
   adapter or move to the D3 Postgres worker path.
+- Phase 5 added a pure balance derivation module: it sums signed cleartext deltas,
+  treats self-transfers as zero net, marks incomplete history as `partial`, formats
+  raw base units with token decimals, and can use `decryptBalanceAs(holder)` as a
+  checkpoint raw total while preserving the partial status. The actual `/balance`
+  route still lands in P6, and wrapper `rate()` conversion remains open with the
+  Phase 2 unshield TODO.
