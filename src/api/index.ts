@@ -1,20 +1,13 @@
-import { Hono } from "hono";
-import { publicClients } from "ponder:api";
+import { db, publicClients } from "ponder:api";
 
 import { confidentialTokenWithWrapperAbi } from "../abi/confidential-token.js";
 import { env, SEPOLIA_CHAIN_ID } from "../config.js";
+import { RawSqlSideTableRepository } from "./raw-sql-repository.js";
+import { createIndexerApi } from "./app.js";
+import type { TokenMetadata } from "./token.js";
 
-interface TokenMetadata {
-  chainId: typeof SEPOLIA_CHAIN_ID;
-  address: `0x${string}`;
-  name: string;
-  symbol: string;
-  decimals: number;
-  kind: "erc7984-erc20-wrapper";
-  underlying: `0x${string}`;
-}
+const repository = new RawSqlSideTableRepository(db);
 
-const app = new Hono();
 let tokenMetadataPromise: Promise<TokenMetadata> | undefined;
 
 const loadTokenMetadata = async (): Promise<TokenMetadata> => {
@@ -57,12 +50,9 @@ const getTokenMetadata = (): Promise<TokenMetadata> => {
   return tokenMetadataPromise;
 };
 
-app.get("/v1/health/live", (context) => {
-  return context.json({ status: "live" });
-});
+await repository.initSideTables();
 
-app.get("/v1/token", async (context) => {
-  return context.json(await getTokenMetadata());
+export default createIndexerApi({
+  repository,
+  getTokenMetadata,
 });
-
-export default app;

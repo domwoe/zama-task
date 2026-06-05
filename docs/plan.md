@@ -160,16 +160,16 @@ where the worker has its own connection and a plain `decryptions` table.
 - **Done when:** balance endpoint returns the correct sum; `partial` shown when history is incomplete.
 
 ## Phase 6 — Read API — `D4` / `API.md`
-- [ ] Mount Hono under `/v1`, JSON, with an error-envelope middleware — API §errors
-- [ ] `GET /v1/token` — API §token
-- [ ] `GET /v1/addresses/{address}/balance` — API §balance
-- [ ] `GET /v1/addresses/{address}/transfers` with keyset cursor + `limit/order/direction/kind/status` filters, including `status=failed` — API §transfers
-- [ ] `GET /v1/transfers/{id}` (single-row poll for `pending`/`unauthorized`/`failed`) — API §transfers
-- [ ] Cursor encode/decode (base64 of `blockNumber,logIndex`); emit `CURSOR_EXPIRED` on reorg past anchor — API §transfers
-- [ ] Amount serialization: `{ status, raw, value, source }` string pair — API §amount
-- [ ] Boundary validation (address, params) with zod → error codes table; unknown address ⇒ empty/zero, not 404 — API §errors
-- [ ] `asOfBlock` on every response — API §conventions
-- [ ] Commit the phase with a state-of-the-art, expressive git message.
+- [x] Mount Hono under `/v1`, JSON, with an error-envelope middleware — API §errors
+- [x] `GET /v1/token` — API §token
+- [x] `GET /v1/addresses/{address}/balance` — API §balance
+- [x] `GET /v1/addresses/{address}/transfers` with keyset cursor + `limit/order/direction/kind/status` filters, including `status=failed` — API §transfers
+- [x] `GET /v1/transfers/{id}` (single-row poll for `pending`/`unauthorized`/`failed`) — API §transfers
+- [x] Cursor encode/decode (base64 of `blockNumber,logIndex`); emit `CURSOR_EXPIRED` on reorg past anchor — API §transfers
+- [x] Amount serialization: `{ status, raw, value, source }` string pair — API §amount
+- [x] Boundary validation (address, params) with zod → error codes table; unknown address ⇒ empty/zero, not 404 — API §errors
+- [x] `asOfBlock` on every response — API §conventions
+- [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** every endpoint returns spec-shaped JSON; bad input uses the envelope.
 
 ## Phase 7 — Health — `D2`/`D7`, API §health
@@ -275,3 +275,8 @@ where the worker has its own connection and a plain `decryptions` table.
   checkpoint raw total while preserving the partial status. The actual `/balance`
   route still lands in P6, and wrapper `rate()` conversion remains open with the
   Phase 2 unshield TODO.
+- Phase 6 chose the raw-SQL side-table adapter: Ponder-owned `transfers` are read
+  with typed Drizzle queries, while drainer-owned `decryptions`/`drainer_state`
+  are accessed through explicit raw SQL and zod-parsed at the boundary. The Hono
+  app is now built through an injectable factory so route behavior is testable
+  without a live Ponder DB.
