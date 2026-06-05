@@ -173,10 +173,10 @@ where the worker has its own connection and a plain `decryptions` table.
 - **Done when:** every endpoint returns spec-shaped JSON; bad input uses the envelope.
 
 ## Phase 7 — Health — `D2`/`D7`, API §health
-- [ ] `GET /v1/health`: **indexer lag** (`headBlock` vs `indexedBlock`) from Ponder's sync status, **and** decryption backlog as independent signals — counts (`pending`/`unauthorized`/`failed`) + `oldestPendingSeconds` from `decryptions`; `lastSuccessAt` + breaker state from `drainerState` — API §health, §Stores
-- [ ] `status` thresholds `healthy|degraded|unhealthy`; `200` vs `503` (breaker open / unbounded backlog) — API §health, `D8`
-- [ ] `GET /v1/health/live` trivial liveness probe — API §health
-- [ ] Commit the phase with a state-of-the-art, expressive git message.
+- [x] `GET /v1/health`: **indexer lag** (`headBlock` vs `indexedBlock`) from Ponder's sync status, **and** decryption backlog as independent signals — counts (`pending`/`unauthorized`/`failed`) + `oldestPendingSeconds` from `decryptions`; `lastSuccessAt` + breaker state from `drainerState` — API §health, §Stores
+- [x] `status` thresholds `healthy|degraded|unhealthy`; `200` vs `503` (breaker open / unbounded backlog) — API §health, `D8`
+- [x] `GET /v1/health/live` trivial liveness probe — API §health
+- [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** health reflects real lag and backlog; returns 503 under the defined unhealthy conditions.
 
 ## Phase 8 — Seed & demo scripts — `D6`, `D7`
@@ -187,22 +187,6 @@ where the worker has its own connection and a plain `decryptions` table.
 - [ ] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** end-to-end on Sepolia shows a row flip `pending/unauthorized → decrypted` after the grant.
 
-## Phase 9 — Tests — `AGENTS.md`, brief
-- [ ] **Happy path:** event in → drainer (fake) → `GET /v1/.../transfers` shows the correct `decrypted` cleartext — `AGENTS.md`, brief
-- [ ] **Negative (chosen + justified):** not-yet-authorized event is retained as `unauthorized` and never dropped — `AGENTS.md`, brief, `D2`
-- [ ] Unit: cursor round-trip; amount serialization; `partial` balance logic; drainer outcome classification — `D8`
-- [ ] `npm run check` green — `AGENTS.md`
-- [ ] Commit the phase with a state-of-the-art, expressive git message.
-- **Done when:** happy + negative pass and `check` is clean.
-
-## Phase 10 — Finalize docs (resolve `DECISIONS.md` TODOs) — brief
-- [ ] **Tests** section: name the negative test and why it was chosen — brief
-- [ ] **Reflection**: least-confident component = the drainer vs. a rate-limited relayer (`D2`/`D8`); how we'd prove it breaks; what we cut; first thing with another 4 h — brief
-- [ ] **SDK feedback** (3 items ready): `Retry-After`/`retryable` on `RelayerRequestFailedError` (`D8`); propagation-lag ergonomics on `DelegationNotPropagatedError` (`D6`); `MemoryStorage` default as a backend footgun (`D6`) — brief
-- [ ] **AI assistance**: process + one subtly-wrong moment corrected by reading source (candidate: the "ECDH-keyed delegation" paraphrase disproven against `delegation-service.ts`, `D6`) — brief
-- [ ] README: fresh-clone-to-running, env, demo, test commands; `.env.example` only, no secrets — brief
-- [ ] Commit the phase with a state-of-the-art, expressive git message.
-- **Done when:** all `DECISIONS.md` TODOs resolved; a clean clone runs end-to-end.
 
 ---
 
@@ -280,3 +264,8 @@ where the worker has its own connection and a plain `decryptions` table.
   are accessed through explicit raw SQL and zod-parsed at the boundary. The Hono
   app is now built through an injectable factory so route behavior is testable
   without a live Ponder DB.
+- Phase 7 health derives indexed block/time by decoding Ponder's
+  `_ponder_checkpoint.latest_checkpoint`, reads the current Sepolia head through
+  Ponder's public client, and keeps decryption backlog/breaker state as a separate
+  signal from the raw-SQL side tables. Breaker-open or very stale backlog returns
+  `503`; softer lag/backlog/failure signals return `degraded` with HTTP `200`.

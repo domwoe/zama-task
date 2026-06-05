@@ -55,4 +55,5 @@ await repository.initSideTables();
 export default createIndexerApi({
   repository,
   getTokenMetadata,
+  getHeadBlock: () => publicClients.sepolia.getBlockNumber(),
 });

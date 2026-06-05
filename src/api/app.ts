@@ -24,6 +24,7 @@ import {
 interface IndexerApiDependencies {
   readonly repository: IndexerReadRepository;
   readonly getTokenMetadata: () => Promise<TokenMetadata>;
+  readonly getHeadBlock?: () => Promise<bigint | null>;
   readonly decryptor?: Decryptor;
   readonly now?: () => Date;
 }
@@ -55,6 +56,10 @@ interface ParsedTransferQueryError {
 
 const defaultLimit = 50;
 const maxLimit = 100;
+const degradedLagBlocks = 20;
+const unhealthyLagBlocks = 1_000;
+const degradedOldestPendingSeconds = 300;
+const unhealthyOldestPendingSeconds = 3_600;
 const addressParamSchema = z.string().refine(isAddress);
 const transferQuerySchema = z.object({
   cursor: z.string().optional(),
@@ -169,8 +174,19 @@ export const createIndexerApi = (dependencies: IndexerApiDependencies): Hono => 
 
   app.get("/v1/health", async (context) => {
     const token = await dependencies.getTokenMetadata();
+    const [checkpoint, headBlock, asOfBlock] = await Promise.all([
+      dependencies.repository.getIndexerCheckpoint(),
+      dependencies.getHeadBlock?.() ?? Promise.resolve(null),
+      dependencies.repository.getAsOfBlock(),
+    ]);
     const decryption = await dependencies.repository.getDecryptionHealth(now());
-    const status = decryption.breakerState === "open" ? "unhealthy" : "healthy";
+    const indexedBlock = checkpoint.indexedBlock ?? asOfBlock;
+    const lagBlocks = headBlock === null || indexedBlock === null ? null : headBlock - indexedBlock;
+    const lagSeconds =
+      checkpoint.indexedBlockTimestamp === null
+        ? null
+        : Math.max(0, Math.floor((now().getTime() - checkpoint.indexedBlockTimestamp.getTime()) / 1_000));
+    const status = healthStatus({ lagBlocks, decryption });
 
     return context.json(
       {
@@ -178,10 +194,10 @@ export const createIndexerApi = (dependencies: IndexerApiDependencies): Hono => 
         chainId: SEPOLIA_CHAIN_ID,
         token: token.address,
         indexer: {
-          headBlock: null,
-          indexedBlock: serializeBlock(await dependencies.repository.getAsOfBlock()),
-          lagBlocks: null,
-          lagSeconds: null,
+          headBlock: serializeBlock(headBlock),
+          indexedBlock: serializeBlock(indexedBlock),
+          lagBlocks: serializeBigintNumber(lagBlocks),
+          lagSeconds,
         },
         decryption,
       },
@@ -277,6 +293,45 @@ const serializeBlock = (block: bigint | null): number | null => {
   }
 
   return value;
+};
+
+const serializeBigintNumber = (value: bigint | null): number | null => {
+  if (value === null) {
+    return null;
+  }
+
+  const serialized = Number(value);
+  if (!Number.isSafeInteger(serialized)) {
+    throw new Error(`Value is outside the JSON safe integer range: ${value.toString()}`);
+  }
+
+  return serialized;
+};
+
+const healthStatus = (input: {
+  readonly lagBlocks: bigint | null;
+  readonly decryption: Awaited<ReturnType<IndexerReadRepository["getDecryptionHealth"]>>;
+}): "healthy" | "degraded" | "unhealthy" => {
+  if (
+    input.decryption.breakerState === "open" ||
+    (input.lagBlocks !== null && input.lagBlocks > BigInt(unhealthyLagBlocks)) ||
+    (input.decryption.oldestPendingSeconds !== null &&
+      input.decryption.oldestPendingSeconds > unhealthyOldestPendingSeconds)
+  ) {
+    return "unhealthy";
+  }
+
+  if (
+    input.decryption.breakerState === "halfOpen" ||
+    input.decryption.failed > 0 ||
+    (input.lagBlocks !== null && input.lagBlocks > BigInt(degradedLagBlocks)) ||
+    (input.decryption.oldestPendingSeconds !== null &&
+      input.decryption.oldestPendingSeconds > degradedOldestPendingSeconds)
+  ) {
+    return "degraded";
+  }
+
+  return "healthy";
 };
 
 const errorJson = (

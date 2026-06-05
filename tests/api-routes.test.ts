@@ -6,6 +6,7 @@ import { createIndexerApi } from "../src/api/app.js";
 import type {
   ApiTransferView,
   DecryptionHealthSnapshot,
+  IndexerCheckpointSnapshot,
   IndexerReadRepository,
 } from "../src/api/repository.js";
 import type { TokenMetadata } from "../src/api/token.js";
@@ -23,15 +24,39 @@ const token: TokenMetadata = {
 const alice = "0x3000000000000000000000000000000000000000";
 const bob = "0x4000000000000000000000000000000000000000";
 
+interface MemoryRepositoryOptions {
+  readonly transfers?: readonly ApiTransferView[];
+  readonly checkpoint?: IndexerCheckpointSnapshot;
+  readonly decryptionHealth?: DecryptionHealthSnapshot;
+}
+
 class MemoryRepository implements IndexerReadRepository {
   readonly #transfers: readonly ApiTransferView[];
+  readonly #checkpoint: IndexerCheckpointSnapshot;
+  readonly #decryptionHealth: DecryptionHealthSnapshot;
 
-  constructor(transfers: readonly ApiTransferView[]) {
-    this.#transfers = transfers;
+  constructor(options: MemoryRepositoryOptions = {}) {
+    this.#transfers = options.transfers ?? [];
+    this.#checkpoint = options.checkpoint ?? {
+      indexedBlock: 12n,
+      indexedBlockTimestamp: new Date("2026-06-05T11:59:30.000Z"),
+    };
+    this.#decryptionHealth = options.decryptionHealth ?? {
+      pending: 1,
+      unauthorized: 0,
+      failed: 0,
+      oldestPendingSeconds: 30,
+      lastSuccessAt: new Date("2026-06-05T12:00:00.000Z"),
+      breakerState: "closed",
+    };
   }
 
   getAsOfBlock(): Promise<bigint | null> {
-    return Promise.resolve(12n);
+    return Promise.resolve(this.#checkpoint.indexedBlock);
+  }
+
+  getIndexerCheckpoint(): Promise<IndexerCheckpointSnapshot> {
+    return Promise.resolve(this.#checkpoint);
   }
 
   getTransferById(id: string): Promise<ApiTransferView | null> {
@@ -52,14 +77,7 @@ class MemoryRepository implements IndexerReadRepository {
   }
 
   getDecryptionHealth(): Promise<DecryptionHealthSnapshot> {
-    return Promise.resolve({
-      pending: 1,
-      unauthorized: 0,
-      failed: 0,
-      oldestPendingSeconds: 30,
-      lastSuccessAt: new Date("2026-06-05T12:00:00.000Z"),
-      breakerState: "closed",
-    });
+    return Promise.resolve(this.#decryptionHealth);
   }
 }
 
@@ -82,10 +100,11 @@ const transfer = (overrides: Partial<ApiTransferView>): ApiTransferView => ({
   ...overrides,
 });
 
-const appWith = (transfers: readonly ApiTransferView[]) =>
+const appWith = (transfers: readonly ApiTransferView[], options: Omit<MemoryRepositoryOptions, "transfers"> = {}) =>
   createIndexerApi({
-    repository: new MemoryRepository(transfers),
+    repository: new MemoryRepository({ ...options, transfers }),
     getTokenMetadata: () => Promise.resolve(token),
+    getHeadBlock: () => Promise.resolve(14n),
     now: () => new Date("2026-06-05T12:00:00.000Z"),
   });
 
@@ -178,6 +197,47 @@ describe("createIndexerApi", () => {
       error: {
         code: "INVALID_ADDRESS",
       },
+    });
+  });
+
+  it("reports independent indexer and decryption health and returns 503 when unhealthy", async () => {
+    const app = createIndexerApi({
+      repository: new MemoryRepository({
+        decryptionHealth: {
+          pending: 10,
+          unauthorized: 2,
+          failed: 1,
+          oldestPendingSeconds: 4_000,
+          lastSuccessAt: new Date("2026-06-05T11:00:00.000Z"),
+          breakerState: "open",
+        },
+        checkpoint: {
+          indexedBlock: 1_000n,
+          indexedBlockTimestamp: new Date("2026-06-05T11:00:00.000Z"),
+        },
+      }),
+      getTokenMetadata: () => Promise.resolve(token),
+      getHeadBlock: () => Promise.resolve(2_050n),
+      now: () => new Date("2026-06-05T12:00:00.000Z"),
+    });
+
+    const response = await app.request("/v1/health");
+    const body = await response.json() as {
+      readonly status: string;
+      readonly indexer: { readonly headBlock: number; readonly indexedBlock: number; readonly lagBlocks: number };
+      readonly decryption: { readonly pending: number; readonly breakerState: string };
+    };
+
+    expect(response.status).toBe(503);
+    expect(body.status).toBe("unhealthy");
+    expect(body.indexer).toMatchObject({
+      headBlock: 2050,
+      indexedBlock: 1000,
+      lagBlocks: 1050,
+    });
+    expect(body.decryption).toMatchObject({
+      pending: 10,
+      breakerState: "open",
     });
   });
 });

@@ -41,8 +41,14 @@ export interface DecryptionHealthSnapshot {
   readonly breakerState: "closed" | "open" | "halfOpen";
 }
 
+export interface IndexerCheckpointSnapshot {
+  readonly indexedBlock: bigint | null;
+  readonly indexedBlockTimestamp: Date | null;
+}
+
 export interface IndexerReadRepository {
   getAsOfBlock(): Promise<bigint | null>;
+  getIndexerCheckpoint(): Promise<IndexerCheckpointSnapshot>;
   getTransferById(id: string): Promise<ApiTransferView | null>;
   listAddressTransfers(address: Address): Promise<readonly ApiTransferView[]>;
   listBalanceTransfers(address: Address): Promise<readonly BalanceTransferView[]>;

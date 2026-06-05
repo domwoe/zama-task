@@ -20,6 +20,7 @@ import type {
   ApiDecryptionView,
   ApiTransferView,
   DecryptionHealthSnapshot,
+  IndexerCheckpointSnapshot,
   IndexerReadRepository,
 } from "./repository.js";
 
@@ -49,6 +50,29 @@ export class RawSqlSideTableRepository implements IndexerReadRepository {
   async getAsOfBlock(): Promise<bigint | null> {
     const [row] = await this.#db.select({ blockNumber: max(transfers.blockNumber) }).from(transfers);
     return row?.blockNumber ?? null;
+  }
+
+  async getIndexerCheckpoint(): Promise<IndexerCheckpointSnapshot> {
+    const [row] = await rowsFromExecute(
+      this.#db.execute(sql`
+        SELECT latest_checkpoint
+        FROM _ponder_checkpoint
+        LIMIT 1
+      `),
+    );
+    const parsed = checkpointRowSchema.safeParse(row);
+    if (!parsed.success) {
+      return {
+        indexedBlock: await this.getAsOfBlock(),
+        indexedBlockTimestamp: null,
+      };
+    }
+
+    const checkpoint = decodePonderCheckpoint(parsed.data.latest_checkpoint);
+    return {
+      indexedBlock: checkpoint.blockNumber,
+      indexedBlockTimestamp: new Date(Number(checkpoint.blockTimestamp) * 1_000),
+    };
   }
 
   async getTransferById(id: string): Promise<ApiTransferView | null> {
@@ -197,6 +221,25 @@ const drainerStateSchema = z.object({
   last_success_at: z.unknown().optional(),
   breaker_state: z.enum(breakerStates).default("closed"),
 });
+
+const checkpointRowSchema = z.object({
+  latest_checkpoint: z.string().length(75),
+});
+
+const decodePonderCheckpoint = (
+  checkpoint: string,
+): {
+  readonly blockTimestamp: bigint;
+  readonly blockNumber: bigint;
+} => {
+  const blockTimestamp = BigInt(checkpoint.slice(0, 10));
+  const blockNumber = BigInt(checkpoint.slice(26, 42));
+
+  return {
+    blockTimestamp,
+    blockNumber,
+  };
+};
 
 const parseDateOrNull = (value: unknown): Date | null => {
   if (value === undefined || value === null) {
