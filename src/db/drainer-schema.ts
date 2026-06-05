@@ -1,11 +1,14 @@
 import {
+  balanceStatuses,
   breakerStates,
   decryptionSources,
   decryptionStatuses,
+  type BalanceStatus,
   type BreakerState,
   type DecryptionSource,
   type DecryptionStatus,
 } from "../types/lifecycle.js";
+import type { BalanceSource } from "../balance/derive.js";
 
 export interface DecryptionRow {
   amountHandle: `0x${string}`;
@@ -29,6 +32,20 @@ export interface DrainerStateRow {
 export interface SdkCredentialRow {
   key: string;
   value: string;
+  updatedAt: Date;
+}
+
+export interface BalanceCacheRow {
+  address: `0x${string}`;
+  status: BalanceStatus;
+  raw: string;
+  value: string;
+  source: BalanceSource;
+  pendingTransfers: number;
+  asOfBlock: bigint | null;
+  transferCount: number;
+  maxTransferBlock: bigint | null;
+  maxTransferLogIndex: number | null;
   updatedAt: Date;
 }
 
@@ -59,6 +76,19 @@ export const createDrainerTablesSql = [
   `CREATE TABLE IF NOT EXISTS sdk_credentials (
     key text PRIMARY KEY,
     value text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS balances (
+    address text PRIMARY KEY,
+    status text NOT NULL CHECK (status IN (${sqlStringList(balanceStatuses)})),
+    raw text NOT NULL,
+    value text NOT NULL,
+    source text NOT NULL CHECK (source IN ('derived', 'checkpoint')),
+    pending_transfers integer NOT NULL,
+    as_of_block numeric,
+    transfer_count integer NOT NULL,
+    max_transfer_block numeric,
+    max_transfer_log_index integer,
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
 ] as const;

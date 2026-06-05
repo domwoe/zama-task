@@ -1,7 +1,7 @@
 import { getAddress, type Address } from "viem";
 
 import type { DecryptionRow, DrainerStateRow } from "../db/drainer-schema.js";
-import type { DecryptionStatus } from "../types/lifecycle.js";
+import { compareDrainerTransfer, orderedTransferCandidates } from "./store.js";
 import type {
   ActiveDelegationQuery,
   DecryptionWrite,
@@ -58,10 +58,6 @@ export class InMemoryDrainerStore implements DrainerStore {
     this.#state = options.state ?? defaultState();
   }
 
-  addTransfer(transfer: DrainerTransfer): void {
-    this.#transfers.set(transfer.id, transfer);
-  }
-
   addDelegation(delegation: DrainerDelegation): void {
     const existingIndex = this.#delegations.findIndex(
       (existing) =>
@@ -107,7 +103,7 @@ export class InMemoryDrainerStore implements DrainerStore {
       }))
       .filter((item) => item.decryption?.status !== "decrypted")
       .filter((item) => item.decryption === null || item.decryption.nextAttemptAt <= now)
-      .sort((left, right) => compareTransferOrder(left.transfer, right.transfer))
+      .sort((left, right) => compareDrainerTransfer(left.transfer, right.transfer))
       .slice(0, limit);
 
     return Promise.resolve(due);
@@ -190,7 +186,7 @@ export class InMemoryDrainerStore implements DrainerStore {
   #oldestTransferForHandle(amountHandle: `0x${string}`): DrainerTransfer | undefined {
     return [...this.#transfers.values()]
       .filter((transfer) => transfer.amountHandle === amountHandle)
-      .sort(compareTransferOrder)[0];
+      .sort(compareDrainerTransfer)[0];
   }
 
   #isActiveDelegation(delegator: Address, delegate: Address, contractAddress: Address, at: Date): boolean {
@@ -206,34 +202,3 @@ export class InMemoryDrainerStore implements DrainerStore {
   }
 }
 
-const compareTransferOrder = (left: DrainerTransfer, right: DrainerTransfer): number => {
-  if (left.blockNumber !== right.blockNumber) {
-    return left.blockNumber < right.blockNumber ? -1 : 1;
-  }
-
-  return left.logIndex - right.logIndex;
-};
-
-const orderedTransferCandidates = (transfer: DrainerTransfer): readonly Address[] => {
-  const candidates = [transfer.to, transfer.from].filter(
-    (address, index, all): address is Address =>
-      address !== "0x0000000000000000000000000000000000000000" && all.indexOf(address) === index,
-  );
-  return candidates;
-};
-
-export const decryptionRow = (
-  amountHandle: `0x${string}`,
-  status: DecryptionStatus,
-  now: Date,
-): DecryptionRow => ({
-  amountHandle,
-  cleartextRaw: null,
-  status,
-  decryptedFor: null,
-  source: null,
-  attempts: 0,
-  nextAttemptAt: now,
-  lastErrorCode: null,
-  lastErrorAt: null,
-});

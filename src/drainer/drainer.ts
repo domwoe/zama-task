@@ -1,9 +1,10 @@
-import { zeroAddress, type Address } from "viem";
+import type { Address } from "viem";
 
 import type { Decryptor } from "../decryptor/decryptor.js";
 import type { DecryptFailure, DecryptFailureKind, DecryptOutcome } from "../decryptor/outcome.js";
 import type { DecryptionRow, DrainerStateRow } from "../db/drainer-schema.js";
 import type { BreakerState, DecryptionStatus } from "../types/lifecycle.js";
+import { orderedTransferCandidates } from "./store.js";
 import type { DrainerStore, DrainerTransfer, DrainerWorkItem } from "./store.js";
 
 interface CredentialRefreshingDecryptor extends Decryptor {
@@ -365,20 +366,6 @@ export const startDecryptionDrainer = (
       await done;
     },
   };
-};
-
-const orderedTransferCandidates = (transfer: DrainerTransfer): readonly Address[] => {
-  const candidates: Address[] = [];
-
-  for (const candidate of [transfer.to, transfer.from]) {
-    if (candidate === zeroAddress || candidates.includes(candidate)) {
-      continue;
-    }
-
-    candidates.push(candidate);
-  }
-
-  return candidates;
 };
 
 const statusForFailure = (

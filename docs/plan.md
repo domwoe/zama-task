@@ -108,8 +108,8 @@ where the worker has its own connection and a plain `decryptions` table.
 - [x] SDK credential store backing the SDK `GenericStorage` — `D6`
 
 **Derived / external:**
-- [ ] Balance is **derived** (a `SUM`, not a stored counter, P5); optionally a `balances` cache row that is **recomputed** on change — `D7`, §Stores
-- [ ] Indexer lag for `/health` reads Ponder's own sync status (head vs indexed), not a hand-maintained row — `D2`, API §health
+- [x] Balance is **derived** (a `SUM`, not a stored counter, P5); optionally a `balances` cache row that is **recomputed** on change — `D7`, §Stores
+- [x] Indexer lag for `/health` reads Ponder's own sync status (head vs indexed), not a hand-maintained row — `D2`, API §health
 - [x] Shared TS string-literal unions for every status enum — `AGENTS.md`
 - [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** schema compiles and types are exported from `ponder.schema.ts`.
@@ -120,7 +120,7 @@ where the worker has its own connection and a plain `decryptions` table.
 - [x] `ConfidentialTransfer` → upsert `transfers` with chain facts + `amountHandle`; derive `kind` (`from==0`⇒shield, `to==0`⇒unshield-burn, else transfer). **No decryption fields** — those live in the drainer-owned `decryptions` (see §Stores); shield mints go through the decrypt path like any transfer (`D7`) — `D7`, `D2`
 - [x] `AmountDisclosed` → set `disclosedRaw`/`disclosedSource='disclosed'` on the transfer row(s) matching the handle (in-handler, reorg-safe) — `D7`
 - [x] `UnwrapRequested` → upsert `unwraps` (`status='requested'`, `amountHandle`); set `unwrapRequestId` on the linked unshield transfer — `D7`
-- [ ] `UnwrapFinalized` → update `unwraps` by `unwrapRequestId` → `status='finalized'` + `cleartextRaw`; propagate `disclosedRaw` to the linked unshield transfer (apply `rate()` if underlying≠wrapped units) — `D7`
+- [x] `UnwrapFinalized` → update `unwraps` by `unwrapRequestId` → `status='finalized'` + `cleartextRaw`; propagate `disclosedRaw` to the linked unshield transfer (apply `rate()` if underlying≠wrapped units) — `D7`
 - [x] `OperatorSet` → index as metadata or skip (no amount) — `D7`
 - [x] ACL `DelegatedForUserDecryption` → upsert `delegations` only. The backfill nudge lives in the drainer (P4), since it owns `decryptions`; handlers never touch the drainer store — `D6`
 - [x] Confirm handlers never call the relayer and never write the drainer store; reorg-safety is structural (§Stores), not a per-write check — `D2`, `D7`
@@ -137,7 +137,7 @@ where the worker has its own connection and a plain `decryptions` table.
 - **Done when:** real and fake both satisfy the interface; fake predicate unit-tested.
 
 ## Phase 4 — Decryption drainer — `D2`, `D8`, `D3`
-- [ ] In-process background loop started alongside the Ponder/API server — `D3`
+- [x] In-process background loop started alongside the Ponder/API server — `D3`
 - [x] Work query: `transfers` LEFT JOIN `decryptions` (on `amountHandle`) for handles with no terminal `decryptions` row and `nextAttemptAt <= now()`, `ORDER BY blockNumber, logIndex ASC` (oldest-first), `LIMIT batch`; lazily seed an `encrypted` `decryptions` row on first sight — `D8`, §Stores
 - [x] **Candidate selection per handle:** candidates = `{to, from} \ {0x0}` filtered to parties with an **active delegation** to the indexer (from `delegations`); try in order **`to` then `from`**; on success record `decryptedFor` + `source='userDecrypt'`. If **no** candidate is delegated → mark `unauthorized` **without a relayer call** — `D6`, `D8`
 - [x] Concurrency cap (~4) + simple relayer rate limiter — `D8`
@@ -153,9 +153,9 @@ where the worker has its own connection and a plain `decryptions` table.
 ## Phase 5 — Balance derivation & checkpoint — `D7`
 - [x] Balance is a **derived aggregate** (no mutable counter): `SUM(signed cleartext)` over the address's `transfers` LEFT JOIN cleartext (`disclosedRaw` ?? `decryptions.cleartextRaw`), signed by direction (in/mint `+`, out/burn `−`) — `D7`, §Stores, API §balance
 - [x] Set `balance.status='partial'` + `pendingTransfers` when any contributing transfer lacks cleartext — `D7`, API §balance
-- [ ] Optional: a `balances` cache row **recomputed** (not incremented) when an address's rows change — idempotent and reorg-safe — `D7`
+- [x] Optional: a `balances` cache row **recomputed** (not incremented) when an address's rows change — idempotent and reorg-safe — `D7`
 - [x] Periodic checkpoint: `decryptBalanceAs(holder)` against `confidentialBalanceOf` to reconcile/detect drift and serve the `partial` fallback total — `D7`
-- [ ] Handle wrapper `rate()` units when cross-filling shield/unshield cleartext — `D7`
+- [x] Handle wrapper `rate()` units when cross-filling shield/unshield cleartext — `D7`
 - [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** balance endpoint returns the correct sum; `partial` shown when history is incomplete.
 
@@ -193,7 +193,7 @@ where the worker has its own connection and a plain `decryptions` table.
 - [x] API serialization unit coverage for cursor round-trip, disclosed amounts, and retryable undecrypted statuses — API §transfers, API §amount
 - [x] Preserve existing balance/drainer/API tests while adding the fake flow coverage.
 - [x] Verify with `pnpm run check` equivalent: `ponder codegen`, `tsc --noEmit`, `eslint`, `vitest run`.
-- [ ] Commit the phase with a state-of-the-art, expressive git message.
+- [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** offline tests cover one event-to-cleartext API happy path and one undecryptable event retention path.
 
 ---
@@ -236,13 +236,12 @@ where the worker has its own connection and a plain `decryptions` table.
   still pending once toy Sepolia values are provided.
 - Phase 1 has schema foundations committed: Ponder owns only reorg-tracked chain
   fact tables, while drainer-owned state is represented by separate SQL DDL/types.
-  Balance derivation and health lag are intentionally still runtime work in P5/P7.
+  Balance derivation, balance caching, and health lag are now runtime-backed by
+  P5/P7.
 - Phase 2's `UnwrapFinalized` handler upserts `unwraps` instead of assuming the
   `UnwrapRequested` row exists, so indexing from a mid-stream `START_BLOCK` still
-  preserves finalized cleartext.
-- TODO: `UnwrapFinalized.cleartextAmount` is currently stored as emitted. The
-  `rate()` conversion for underlying-vs-wrapped units is still open and should be
-  handled before considering the unshield propagation bullet complete.
+  preserves finalized cleartext. It reads wrapper `rate()` at the event block and
+  stores the propagated cleartext in wrapped-token units.
 - Phase 3 SDK lookup: Context7 only resolved the legacy `/zama-ai/relayer-sdk`, so
   SDK integration was based on the proper `zama-ai/sdk` `prerelease` branch
   (`examples/node-viem/WALKTHROUGH.md`) plus the installed
@@ -250,23 +249,22 @@ where the worker has its own connection and a plain `decryptions` table.
 - Phase 3 added `vitest` and `pnpm test`; `pnpm run check` now includes the fake
   decryptor predicate tests.
 - Phase 3's SDK storage is a persistent `GenericStorage` adapter over the
-  `sdk_credentials` store shape. The concrete in-process PGlite connection wiring
-  is still part of the P4 drainer/runtime integration.
+  `sdk_credentials` store shape. The Ponder API raw-SQL adapter now backs it at
+  runtime.
 - Phase 4 added the drainer core behind a `DrainerStore` contract, plus an
   in-memory implementation for offline tests. The core covers oldest-first work
   selection, delegated candidate ordering (`to` then `from`), no-relayer-call
   unauthorized classification, full-jitter retries, stale-credential refresh
   hooks, a simple relayer gate, circuit-breaker state, and the ACL backfill nudge.
 - Ponder's `ponder:api` `db` export is `ReadonlyDrizzle` (no typed
-  `insert`/`update`/`delete`), so the API-server startup/SQL adapter for the
-  drainer-owned side tables remains unchecked until we wire an explicit raw-SQL
-  adapter or move to the D3 Postgres worker path.
+  `insert`/`update`/`delete`), so drainer-owned side-table writes use an explicit
+  raw-SQL adapter while Ponder-owned table reads stay typed.
 - Phase 5 added a pure balance derivation module: it sums signed cleartext deltas,
   treats self-transfers as zero net, marks incomplete history as `partial`, formats
   raw base units with token decimals, and can use `decryptBalanceAs(holder)` as a
-  checkpoint raw total while preserving the partial status. The actual `/balance`
-  route still lands in P6, and wrapper `rate()` conversion remains open with the
-  Phase 2 unshield TODO.
+  checkpoint raw total while preserving the partial status. The `/balance` route
+  now uses a recomputed `balances` cache row for complete balances, validated
+  against the current address transfer fingerprint, and refreshes it on cache miss.
 - Phase 6 chose the raw-SQL side-table adapter: Ponder-owned `transfers` are read
   with typed Drizzle queries, while drainer-owned `decryptions`/`drainer_state`
   are accessed through explicit raw SQL and zod-parsed at the boundary. The Hono

@@ -31,6 +31,23 @@ export const parseStartBlock = (value: string | undefined): number | "latest" =>
   return block;
 };
 
+export const parsePositiveInteger = (
+  value: string | undefined,
+  fallback: number,
+  name: string,
+): number => {
+  if (value === undefined || value.length === 0) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer, got: ${value}`);
+  }
+
+  return parsed;
+};
+
 export const requireIndexerPrivateKey = (): `0x${string}` => {
   const privateKey = process.env.INDEXER_PRIVATE_KEY;
 
@@ -47,6 +64,9 @@ export const requireIndexerPrivateKey = (): `0x${string}` => {
 
 export const env = {
   aclAddress: normalizeAddress(process.env.FHEVM_ACL_ADDRESS),
+  decryptBatchSize: parsePositiveInteger(process.env.DECRYPT_BATCH_SIZE, 25, "DECRYPT_BATCH_SIZE"),
+  decryptConcurrency: parsePositiveInteger(process.env.DECRYPT_CONCURRENCY, 4, "DECRYPT_CONCURRENCY"),
+  decryptPollMs: parsePositiveInteger(process.env.DECRYPT_POLL_MS, 5_000, "DECRYPT_POLL_MS"),
   indexerAddress: normalizeAddress(process.env.INDEXER_ADDRESS),
   relayerApiKey: process.env.RELAYER_API_KEY,
   rpcUrl: process.env.SEPOLIA_RPC_URL ?? "http://127.0.0.1:8545",

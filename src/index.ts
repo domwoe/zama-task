@@ -3,6 +3,9 @@ import { ponder } from "ponder:registry";
 import { delegations, transfers, unwraps } from "ponder:schema";
 import { zeroAddress } from "viem";
 
+import { confidentialTokenWithWrapperAbi } from "./abi/confidential-token.js";
+import { underlyingToWrappedRaw } from "./balance/rate.js";
+import { env } from "./config.js";
 import type { TransferKind } from "./types/lifecycle.js";
 
 const transferId = (txHash: `0x${string}`, logIndex: number): string => {
@@ -91,6 +94,14 @@ ponder.on("ConfidentialToken:UnwrapRequested", async ({ event, context }) => {
 });
 
 ponder.on("ConfidentialToken:UnwrapFinalized", async ({ event, context }) => {
+  const rate = await context.client.readContract({
+    address: env.tokenAddress,
+    abi: confidentialTokenWithWrapperAbi,
+    functionName: "rate",
+    blockNumber: event.block.number,
+  });
+  const wrappedCleartextRaw = underlyingToWrappedRaw(event.args.cleartextAmount, rate);
+
   await context.db
     .insert(unwraps)
     .values({
@@ -98,7 +109,7 @@ ponder.on("ConfidentialToken:UnwrapFinalized", async ({ event, context }) => {
       receiver: event.args.receiver,
       amountHandle: event.args.encryptedAmount,
       status: "finalized",
-      cleartextRaw: event.args.cleartextAmount.toString(),
+      cleartextRaw: wrappedCleartextRaw,
       requestedBlock: event.block.number,
       finalizedBlock: event.block.number,
     })
@@ -106,7 +117,7 @@ ponder.on("ConfidentialToken:UnwrapFinalized", async ({ event, context }) => {
       receiver: event.args.receiver,
       amountHandle: event.args.encryptedAmount,
       status: "finalized",
-      cleartextRaw: event.args.cleartextAmount.toString(),
+      cleartextRaw: wrappedCleartextRaw,
       finalizedBlock: event.block.number,
     });
 
@@ -114,7 +125,7 @@ ponder.on("ConfidentialToken:UnwrapFinalized", async ({ event, context }) => {
     .update(transfers)
     .set({
       amountHandle: event.args.encryptedAmount,
-      disclosedRaw: event.args.cleartextAmount.toString(),
+      disclosedRaw: wrappedCleartextRaw,
       disclosedSource: "disclosed",
     })
     .where(eq(transfers.unwrapRequestId, event.args.unwrapRequestId));

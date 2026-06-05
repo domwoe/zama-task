@@ -1,6 +1,6 @@
 import type { Address } from "viem";
 
-import type { BalanceTransferView } from "../balance/derive.js";
+import type { BalanceTransferView, DerivedBalance } from "../balance/derive.js";
 import type { DecryptionSource, DecryptionStatus, TransferKind } from "../types/lifecycle.js";
 
 export type TransferDirection = "in" | "out" | "self";
@@ -46,11 +46,18 @@ export interface IndexerCheckpointSnapshot {
   readonly indexedBlockTimestamp: Date | null;
 }
 
+export interface BalanceCacheView extends DerivedBalance {
+  readonly asOfBlock: bigint | null;
+  readonly updatedAt: Date;
+}
+
 export interface IndexerReadRepository {
   getAsOfBlock(): Promise<bigint | null>;
   getIndexerCheckpoint(): Promise<IndexerCheckpointSnapshot>;
   getTransferById(id: string): Promise<ApiTransferView | null>;
   listAddressTransfers(address: Address): Promise<readonly ApiTransferView[]>;
   listBalanceTransfers(address: Address): Promise<readonly BalanceTransferView[]>;
+  getCachedBalance(address: Address, asOfBlock: bigint | null): Promise<BalanceCacheView | null>;
+  writeCachedBalance(address: Address, balance: DerivedBalance, asOfBlock: bigint | null, updatedAt: Date): Promise<void>;
   getDecryptionHealth(now: Date): Promise<DecryptionHealthSnapshot>;
 }

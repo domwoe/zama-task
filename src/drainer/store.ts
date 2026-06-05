@@ -1,4 +1,4 @@
-import type { Address } from "viem";
+import { zeroAddress, type Address } from "viem";
 
 import type { DecryptionRow, DrainerStateRow } from "../db/drainer-schema.js";
 import type { DecryptionSource, DecryptionStatus } from "../types/lifecycle.js";
@@ -54,3 +54,26 @@ export interface DrainerStore {
   getDrainerState(): Promise<DrainerStateRow>;
   writeDrainerState(row: DrainerStateRow): Promise<void>;
 }
+
+/** Total order over a transfer's on-chain position: block number, then log index. */
+export const compareDrainerTransfer = (left: DrainerTransfer, right: DrainerTransfer): number => {
+  if (left.blockNumber !== right.blockNumber) {
+    return left.blockNumber < right.blockNumber ? -1 : 1;
+  }
+
+  return left.logIndex - right.logIndex;
+};
+
+/** Delegation candidates for a transfer, in `[to, from]` priority order, excluding the zero address. */
+export const orderedTransferCandidates = (transfer: DrainerTransfer): readonly Address[] => {
+  const candidates: Address[] = [];
+  for (const candidate of [transfer.to, transfer.from]) {
+    if (candidate === zeroAddress || candidates.includes(candidate)) {
+      continue;
+    }
+
+    candidates.push(candidate);
+  }
+
+  return candidates;
+};

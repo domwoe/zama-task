@@ -24,12 +24,3 @@ export type BreakerState = (typeof breakerStates)[number];
 
 export const balanceStatuses = ["complete", "partial", "unavailable"] as const;
 export type BalanceStatus = (typeof balanceStatuses)[number];
-
-export const amountStatuses = [
-  "decrypted",
-  "encrypted",
-  "pending",
-  "unauthorized",
-  "failed",
-] as const;
-export type AmountStatus = (typeof amountStatuses)[number];

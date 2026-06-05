@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { zeroAddress, type Address } from "viem";
 
 import { FakeDecryptor } from "../src/decryptor/fake-decryptor.js";
+import { underlyingToWrappedRaw } from "../src/balance/rate.js";
 import {
   decryptBalanceCheckpoint,
   deriveBalance,
@@ -109,5 +110,10 @@ describe("deriveBalance", () => {
     await expect(decryptBalanceCheckpoint(decryptor, alice)).resolves.toEqual({
       cleartextRaw: "123",
     });
+  });
+
+  it("converts unwrap public amounts from underlying units to wrapped units", () => {
+    expect(underlyingToWrappedRaw(1_000n, 10n)).toBe("100");
+    expect(() => underlyingToWrappedRaw(1_000n, 0n)).toThrow("Wrapper rate must be positive");
   });
 });

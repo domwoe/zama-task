@@ -70,6 +70,14 @@ class FlowRepository implements IndexerReadRepository {
     return this.listAddressTransfers(address);
   }
 
+  getCachedBalance(): Promise<null> {
+    return Promise.resolve(null);
+  }
+
+  writeCachedBalance(): Promise<void> {
+    return Promise.resolve();
+  }
+
   getDecryptionHealth(): Promise<DecryptionHealthSnapshot> {
     return Promise.resolve({
       pending: 0,

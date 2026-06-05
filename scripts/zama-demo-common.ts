@@ -33,15 +33,6 @@ export const requireEnv = (name: string): string => {
   return value;
 };
 
-export const optionalAddressEnv = (name: string): Address | null => {
-  const value = process.env[name];
-  if (value === undefined || value.length === 0) {
-    return null;
-  }
-
-  return parseAddress(value, name);
-};
-
 export const requireAddressEnv = (name: string): Address => parseAddress(requireEnv(name), name);
 
 export const requirePrivateKeyEnv = (name: string): Hex => {
@@ -61,8 +52,6 @@ export const optionalAmountEnv = (name: string): bigint | null => {
 
   return parseAmount(value, name);
 };
-
-export const requireAmountEnv = (name: string): bigint => parseAmount(requireEnv(name), name);
 
 export const createDemoSdk = (privateKeyEnvName: string): DemoSdkContext => {
   const rpcUrl = requireEnv("SEPOLIA_RPC_URL");

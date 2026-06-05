@@ -95,6 +95,23 @@ export const createIndexerApi = (dependencies: IndexerApiDependencies): Hono => 
     }
 
     const token = await dependencies.getTokenMetadata();
+    const asOfBlock = await dependencies.repository.getAsOfBlock();
+    const cached = await dependencies.repository.getCachedBalance(address, asOfBlock);
+    if (cached !== null) {
+      return context.json({
+        address,
+        balance: {
+          status: cached.status,
+          raw: cached.raw,
+          value: cached.value,
+          source: cached.source,
+          pendingTransfers: cached.pendingTransfers,
+        },
+        asOfBlock: serializeBlock(asOfBlock),
+        asOfTime: now().toISOString(),
+      });
+    }
+
     const transfers = await dependencies.repository.listBalanceTransfers(address);
     const checkpoint = await loadCheckpoint(dependencies.decryptor, address);
     const balance = deriveBalance({
@@ -103,11 +120,14 @@ export const createIndexerApi = (dependencies: IndexerApiDependencies): Hono => 
       decimals: token.decimals,
       checkpoint,
     });
+    if (balance.status === "complete") {
+      await dependencies.repository.writeCachedBalance(address, balance, asOfBlock, now());
+    }
 
     return context.json({
       address,
       balance,
-      asOfBlock: serializeBlock(await dependencies.repository.getAsOfBlock()),
+      asOfBlock: serializeBlock(asOfBlock),
       asOfTime: now().toISOString(),
     });
   });

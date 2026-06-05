@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { zeroAddress, type Address } from "viem";
 
-import type { BalanceTransferView } from "../src/balance/derive.js";
+import type { BalanceTransferView, DerivedBalance } from "../src/balance/derive.js";
 import { createIndexerApi } from "../src/api/app.js";
 import type {
   ApiTransferView,
+  BalanceCacheView,
   DecryptionHealthSnapshot,
   IndexerCheckpointSnapshot,
   IndexerReadRepository,
@@ -28,12 +29,14 @@ interface MemoryRepositoryOptions {
   readonly transfers?: readonly ApiTransferView[];
   readonly checkpoint?: IndexerCheckpointSnapshot;
   readonly decryptionHealth?: DecryptionHealthSnapshot;
+  readonly cachedBalance?: BalanceCacheView | null;
 }
 
 class MemoryRepository implements IndexerReadRepository {
   readonly #transfers: readonly ApiTransferView[];
   readonly #checkpoint: IndexerCheckpointSnapshot;
   readonly #decryptionHealth: DecryptionHealthSnapshot;
+  #cachedBalance: BalanceCacheView | null;
 
   constructor(options: MemoryRepositoryOptions = {}) {
     this.#transfers = options.transfers ?? [];
@@ -49,6 +52,7 @@ class MemoryRepository implements IndexerReadRepository {
       lastSuccessAt: new Date("2026-06-05T12:00:00.000Z"),
       breakerState: "closed",
     };
+    this.#cachedBalance = options.cachedBalance ?? null;
   }
 
   getAsOfBlock(): Promise<bigint | null> {
@@ -74,6 +78,23 @@ class MemoryRepository implements IndexerReadRepository {
 
   listBalanceTransfers(address: Address): Promise<readonly BalanceTransferView[]> {
     return this.listAddressTransfers(address);
+  }
+
+  getCachedBalance(_address: Address, asOfBlock: bigint | null): Promise<BalanceCacheView | null> {
+    if (this.#cachedBalance?.asOfBlock !== asOfBlock) {
+      return Promise.resolve(null);
+    }
+
+    return Promise.resolve(this.#cachedBalance);
+  }
+
+  writeCachedBalance(_address: Address, balance: DerivedBalance, asOfBlock: bigint | null, updatedAt: Date): Promise<void> {
+    this.#cachedBalance = {
+      ...balance,
+      asOfBlock,
+      updatedAt,
+    };
+    return Promise.resolve();
   }
 
   getDecryptionHealth(): Promise<DecryptionHealthSnapshot> {
@@ -145,6 +166,35 @@ describe("createIndexerApi", () => {
       status: "partial",
       raw: "100000000",
       pendingTransfers: 1,
+    });
+  });
+
+  it("uses the cached balance when it matches the current indexed block", async () => {
+    const app = appWith([], {
+      cachedBalance: {
+        status: "complete",
+        raw: "42000000",
+        value: "42.0",
+        source: "derived",
+        pendingTransfers: 0,
+        asOfBlock: 12n,
+        updatedAt: new Date("2026-06-05T12:00:00.000Z"),
+      },
+    });
+
+    const response = await app.request(`/v1/addresses/${alice}/balance`);
+    const body = await response.json() as {
+      readonly balance: {
+        readonly raw: string;
+        readonly value: string;
+        readonly source: string;
+      };
+    };
+
+    expect(body.balance).toMatchObject({
+      raw: "42000000",
+      value: "42.0",
+      source: "derived",
     });
   });
 
