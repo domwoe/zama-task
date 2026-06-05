@@ -138,16 +138,16 @@ where the worker has its own connection and a plain `decryptions` table.
 
 ## Phase 4 — Decryption drainer — `D2`, `D8`, `D3`
 - [ ] In-process background loop started alongside the Ponder/API server — `D3`
-- [ ] Work query: `transfers` LEFT JOIN `decryptions` (on `amountHandle`) for handles with no terminal `decryptions` row and `nextAttemptAt <= now()`, `ORDER BY blockNumber, logIndex ASC` (oldest-first), `LIMIT batch`; lazily seed an `encrypted` `decryptions` row on first sight — `D8`, §Stores
-- [ ] **Candidate selection per handle:** candidates = `{to, from} \ {0x0}` filtered to parties with an **active delegation** to the indexer (from `delegations`); try in order **`to` then `from`**; on success record `decryptedFor` + `source='userDecrypt'`. If **no** candidate is delegated → mark `unauthorized` **without a relayer call** — `D6`, `D8`
-- [ ] Concurrency cap (~4) + simple relayer rate limiter — `D8`
-- [ ] Classify outcome via `matchZamaError` → set `decryptions.status` + `nextAttemptAt = now + backoff(class, attempts)` (full-jitter exp) — `D8`
-- [ ] **Backfill nudge (owned here):** detect new/updated `delegations` rows and pull `nextAttemptAt=now()` forward for that delegator's `unauthorized` handles — `D6`, `D8`
-- [ ] `unauthorized` → slow backstop poll; `failed` → surfaced, slow-retry, non-terminal — `D8`
-- [ ] Stale-credential outcome → refresh keypair and retry, not a row failure — `D8`, `D6`
-- [ ] Circuit breaker: pause whole drainer on sustained 429/5xx/`AclPaused`; persist `breakerState`/`lastSuccessAt` in `drainerState` — `D8`, API §health
-- [ ] Writes **only** the `decryptions` store (keyed by handle); no Ponder-table writes, no conditional-write dance — reorg-immunity is structural (§Stores). Balance needs no update here — it is derived (P5) — `D7`, §Stores
-- [ ] Commit the phase with a state-of-the-art, expressive git message.
+- [x] Work query: `transfers` LEFT JOIN `decryptions` (on `amountHandle`) for handles with no terminal `decryptions` row and `nextAttemptAt <= now()`, `ORDER BY blockNumber, logIndex ASC` (oldest-first), `LIMIT batch`; lazily seed an `encrypted` `decryptions` row on first sight — `D8`, §Stores
+- [x] **Candidate selection per handle:** candidates = `{to, from} \ {0x0}` filtered to parties with an **active delegation** to the indexer (from `delegations`); try in order **`to` then `from`**; on success record `decryptedFor` + `source='userDecrypt'`. If **no** candidate is delegated → mark `unauthorized` **without a relayer call** — `D6`, `D8`
+- [x] Concurrency cap (~4) + simple relayer rate limiter — `D8`
+- [x] Classify outcome via `matchZamaError` → set `decryptions.status` + `nextAttemptAt = now + backoff(class, attempts)` (full-jitter exp) — `D8`
+- [x] **Backfill nudge (owned here):** detect new/updated `delegations` rows and pull `nextAttemptAt=now()` forward for that delegator's `unauthorized` handles — `D6`, `D8`
+- [x] `unauthorized` → slow backstop poll; `failed` → surfaced, slow-retry, non-terminal — `D8`
+- [x] Stale-credential outcome → refresh keypair and retry, not a row failure — `D8`, `D6`
+- [x] Circuit breaker: pause whole drainer on sustained 429/5xx/`AclPaused`; persist `breakerState`/`lastSuccessAt` in `drainerState` — `D8`, API §health
+- [x] Writes **only** the `decryptions` store (keyed by handle); no Ponder-table writes, no conditional-write dance — reorg-immunity is structural (§Stores). Balance needs no update here — it is derived (P5) — `D7`, §Stores
+- [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** against the fake, `encrypted→decrypted`, and `unauthorized→decrypted` after a delegation flip.
 
 ## Phase 5 — Balance derivation & checkpoint — `D7`
@@ -260,3 +260,12 @@ where the worker has its own connection and a plain `decryptions` table.
 - Phase 3's SDK storage is a persistent `GenericStorage` adapter over the
   `sdk_credentials` store shape. The concrete in-process PGlite connection wiring
   is still part of the P4 drainer/runtime integration.
+- Phase 4 added the drainer core behind a `DrainerStore` contract, plus an
+  in-memory implementation for offline tests. The core covers oldest-first work
+  selection, delegated candidate ordering (`to` then `from`), no-relayer-call
+  unauthorized classification, full-jitter retries, stale-credential refresh
+  hooks, a simple relayer gate, circuit-breaker state, and the ACL backfill nudge.
+- Ponder's `ponder:api` `db` export is `ReadonlyDrizzle` (no typed
+  `insert`/`update`/`delete`), so the API-server startup/SQL adapter for the
+  drainer-owned side tables remains unchecked until we wire an explicit raw-SQL
+  adapter or move to the D3 Postgres worker path.
