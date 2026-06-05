@@ -98,20 +98,20 @@ where the worker has its own connection and a plain `decryptions` table.
 
 ## Phase 1 — Schema & data model — `D2`, `D7`, `D8`
 **Ponder onchain tables** (chain facts, written only in handlers — see §Stores):
-- [ ] `transfers`: `id` (`txHash-logIndex`), `txHash`, `blockNumber`, `logIndex`, `timestamp`, `from`, `to`, `kind` (`transfer|shield|unshield|disclosure`), `amountHandle` (bytes32), `unwrapRequestId` (bytes32|null — links unshield rows), `disclosedRaw` (string|null), `disclosedSource` (`disclosed`|null) — chain facts + in-handler disclosed cleartext; **no decryption-state columns** (those live in `decryptions`) — `D7`, API §amount
-- [ ] `unwraps` keyed by `unwrapRequestId`: `receiver`, `amountHandle`, `status` (`requested|finalized`), `cleartextRaw` (string|null), `requestedBlock`, `finalizedBlock` — two-phase unshield correlation — `D7`
-- [ ] `delegations`: `delegator`, `delegate`, `contractAddress`, `expiry`, `lastEventBlock` — `D6`
+- [x] `transfers`: `id` (`txHash-logIndex`), `txHash`, `blockNumber`, `logIndex`, `timestamp`, `from`, `to`, `kind` (`transfer|shield|unshield|disclosure`), `amountHandle` (bytes32), `unwrapRequestId` (bytes32|null — links unshield rows), `disclosedRaw` (string|null), `disclosedSource` (`disclosed`|null) — chain facts + in-handler disclosed cleartext; **no decryption-state columns** (those live in `decryptions`) — `D7`, API §amount
+- [x] `unwraps` keyed by `unwrapRequestId`: `receiver`, `amountHandle`, `status` (`requested|finalized`), `cleartextRaw` (string|null), `requestedBlock`, `finalizedBlock` — two-phase unshield correlation — `D7`
+- [x] `delegations`: `delegator`, `delegate`, `contractAddress`, `expiry`, `lastEventBlock` — `D6`
 
 **Drainer-owned store** (not Ponder tables, written only by the drainer — see §Stores):
-- [ ] `decryptions` keyed by `amountHandle` (reorg-immune): `cleartextRaw` (string|null), `status` (`encrypted|pending|unauthorized|decrypted|failed`), `decryptedFor` (address|null — which delegator's right unlocked it), `source` (`userDecrypt`), `attempts`, `nextAttemptAt`, `lastErrorCode`, `lastErrorAt` — `D8`
-- [ ] `drainerState`: `lastSuccessAt`, `breakerState`, `breakerOpenedAt` (for `/health`) — `D8`, API §health
-- [ ] SDK credential store backing the SDK `GenericStorage` — `D6`
+- [x] `decryptions` keyed by `amountHandle` (reorg-immune): `cleartextRaw` (string|null), `status` (`encrypted|pending|unauthorized|decrypted|failed`), `decryptedFor` (address|null — which delegator's right unlocked it), `source` (`userDecrypt`), `attempts`, `nextAttemptAt`, `lastErrorCode`, `lastErrorAt` — `D8`
+- [x] `drainerState`: `lastSuccessAt`, `breakerState`, `breakerOpenedAt` (for `/health`) — `D8`, API §health
+- [x] SDK credential store backing the SDK `GenericStorage` — `D6`
 
 **Derived / external:**
 - [ ] Balance is **derived** (a `SUM`, not a stored counter, P5); optionally a `balances` cache row that is **recomputed** on change — `D7`, §Stores
 - [ ] Indexer lag for `/health` reads Ponder's own sync status (head vs indexed), not a hand-maintained row — `D2`, API §health
-- [ ] Shared TS string-literal unions for every status enum — `AGENTS.md`
-- [ ] Commit the phase with a state-of-the-art, expressive git message.
+- [x] Shared TS string-literal unions for every status enum — `AGENTS.md`
+- [x] Commit the phase with a state-of-the-art, expressive git message.
 - **Done when:** schema compiles and types are exported from `ponder.schema.ts`.
 
 ## Phase 2 — Indexing handlers (write-only, never decrypt) — `D7`, `D6`, `D2`
@@ -242,3 +242,6 @@ where the worker has its own connection and a plain `decryptions` table.
   real `.env` values (`SEPOLIA_RPC_URL`, token, ACL, indexer address). The scaffold
   is validated with `ponder codegen`, TypeScript, and ESLint; boot verification is
   still pending once toy Sepolia values are provided.
+- Phase 1 has schema foundations committed: Ponder owns only reorg-tracked chain
+  fact tables, while drainer-owned state is represented by separate SQL DDL/types.
+  Balance derivation and health lag are intentionally still runtime work in P5/P7.
