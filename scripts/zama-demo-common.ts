@@ -2,26 +2,34 @@ import { MemoryStorage, ZamaSDK, type FheChain } from "@zama-fhe/sdk";
 import { sepolia as zamaSepoliaPreset } from "@zama-fhe/sdk/chains";
 import { node } from "@zama-fhe/sdk/node";
 import { createConfig } from "@zama-fhe/sdk/viem";
-import { existsSync, readFileSync } from "node:fs";
 import {
   createPublicClient,
   createWalletClient,
   getAddress,
   http,
   isAddress,
+  type Account,
   type Address,
   type Hex,
+  type PublicClient,
+  type WalletClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia as viemSepolia } from "viem/chains";
 
-loadDotEnv();
-
 export interface DemoSdkContext {
   readonly accountAddress: Address;
+  readonly account: Account;
   readonly sdk: ZamaSDK;
   readonly tokenAddress: Address;
+  readonly publicClient: PublicClient;
+  readonly walletClient: WalletClient;
   dispose(): void;
+}
+
+export interface MintResult {
+  readonly underlying: Address;
+  readonly txHash: Hex;
 }
 
 export const requireEnv = (name: string): string => {
@@ -93,12 +101,69 @@ export const createDemoSdk = (privateKeyEnvName: string): DemoSdkContext => {
 
   return {
     accountAddress: account.address,
+    account,
     sdk,
     tokenAddress,
+    publicClient,
+    walletClient,
     dispose() {
       sdk.terminate();
     },
   };
+};
+
+export const wrapperUnderlyingAbi = [
+  {
+    type: "function",
+    name: "underlying",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+] as const;
+
+export const erc20MintAbi = [
+  {
+    type: "function",
+    name: "mint",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+export const tokenReadAbi = [
+  { type: "function", name: "name", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "string" }] },
+  { type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "string" }] },
+  { type: "function", name: "decimals", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "uint8" }] },
+] as const;
+
+// Mints the wrapper's public underlying ERC-20 to the holder so a fresh clone has
+// tokens to shield. The demo underlying is a mock ERC-20 with an unrestricted
+// mint(); against a real underlying without one this reverts, which is expected.
+export const mintUnderlying = async (
+  context: DemoSdkContext,
+  amount: bigint,
+): Promise<MintResult> => {
+  const underlying = await context.publicClient.readContract({
+    address: context.tokenAddress,
+    abi: wrapperUnderlyingAbi,
+    functionName: "underlying",
+  });
+  const txHash = await context.walletClient.writeContract({
+    address: underlying,
+    abi: erc20MintAbi,
+    functionName: "mint",
+    args: [context.accountAddress, amount],
+    account: context.account,
+    chain: viemSepolia,
+  });
+  await context.publicClient.waitForTransactionReceipt({ hash: txHash });
+
+  return { underlying, txHash };
 };
 
 const parseAddress = (value: string, name: string): Address => {
@@ -115,37 +180,4 @@ const parseAmount = (value: string, name: string): bigint => {
   }
 
   return BigInt(value);
-};
-
-function loadDotEnv(): void {
-  if (!existsSync(".env")) {
-    return;
-  }
-
-  for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0 || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const separatorIndex = trimmed.indexOf("=");
-    if (separatorIndex === -1) {
-      continue;
-    }
-
-    const key = trimmed.slice(0, separatorIndex).trim();
-    const rawValue = trimmed.slice(separatorIndex + 1).trim();
-    process.env[key] ??= stripOptionalQuotes(rawValue);
-  }
-}
-
-const stripOptionalQuotes = (value: string): string => {
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-
-  return value;
 };

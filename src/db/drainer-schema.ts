@@ -1,9 +1,9 @@
 import {
-  balanceStatuses,
+  balanceTrustLevels,
   breakerStates,
   decryptionSources,
   decryptionStatuses,
-  type BalanceStatus,
+  type BalanceTrust,
   type BreakerState,
   type DecryptionSource,
   type DecryptionStatus,
@@ -37,7 +37,7 @@ export interface SdkCredentialRow {
 
 export interface BalanceCacheRow {
   address: `0x${string}`;
-  status: BalanceStatus;
+  status: BalanceTrust;
   raw: string;
   value: string;
   source: BalanceSource;
@@ -80,7 +80,7 @@ export const createDrainerTablesSql = [
   )`,
   `CREATE TABLE IF NOT EXISTS balances (
     address text PRIMARY KEY,
-    status text NOT NULL CHECK (status IN (${sqlStringList(balanceStatuses)})),
+    status text NOT NULL CHECK (status IN (${sqlStringList(balanceTrustLevels)})),
     raw text NOT NULL,
     value text NOT NULL,
     source text NOT NULL CHECK (source IN ('derived', 'checkpoint')),

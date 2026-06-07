@@ -1,5 +1,6 @@
 import {
   createDemoSdk,
+  mintUnderlying,
   optionalAmountEnv,
   requireAddressEnv,
 } from "./zama-demo-common.ts";
@@ -9,12 +10,20 @@ const context = createDemoSdk("DEMO_HOLDER_PRIVATE_KEY");
 try {
   const token = context.sdk.createWrappedToken(context.tokenAddress);
   const recipient = requireAddressEnv("DEMO_RECIPIENT_ADDRESS");
+  const mintAmount = optionalAmountEnv("DEMO_MINT_AMOUNT");
   const shieldAmount = optionalAmountEnv("DEMO_SHIELD_AMOUNT");
   const transferAmount = optionalAmountEnv("DEMO_TRANSFER_AMOUNT");
   const unshieldAmount = optionalAmountEnv("DEMO_UNSHIELD_AMOUNT");
 
   console.log(`holder=${context.accountAddress}`);
   console.log(`token=${context.tokenAddress}`);
+
+  if (mintAmount !== null) {
+    console.log(`mint underlying raw=${mintAmount.toString()}`);
+    const result = await mintUnderlying(context, mintAmount);
+    console.log(`underlying=${result.underlying}`);
+    console.log(`mintReceipt=${result.txHash}`);
+  }
 
   if (shieldAmount !== null) {
     console.log(`shield raw=${shieldAmount.toString()}`);

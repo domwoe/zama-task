@@ -9,13 +9,18 @@ overrides:
   esbuild: '>=0.25.0'
   ws: '>=8.20.1'
 
+patchedDependencies:
+  '@zama-fhe/sdk@3.1.0-alpha.4':
+    hash: ef01b8c8565b5e020c6ac7e32e7735b3667c2add57682a592832d9698e08da72
+    path: patches/@zama-fhe__sdk@3.1.0-alpha.4.patch
+
 importers:
 
   .:
     dependencies:
       '@zama-fhe/sdk':
         specifier: ^3.1.0-alpha.4
-        version: 3.1.0-alpha.4(ethers@6.16.0)(viem@2.52.2(typescript@5.9.3)(zod@4.4.3))
+        version: 3.1.0-alpha.4(patch_hash=ef01b8c8565b5e020c6ac7e32e7735b3667c2add57682a592832d9698e08da72)(ethers@6.16.0)(viem@2.52.2(typescript@5.9.3)(zod@4.4.3))
       hono:
         specifier: ^4.12.23
         version: 4.12.23
@@ -2887,7 +2892,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@zama-fhe/sdk@3.1.0-alpha.4(ethers@6.16.0)(viem@2.52.2(typescript@5.9.3)(zod@4.4.3))':
+  '@zama-fhe/sdk@3.1.0-alpha.4(patch_hash=ef01b8c8565b5e020c6ac7e32e7735b3667c2add57682a592832d9698e08da72)(ethers@6.16.0)(viem@2.52.2(typescript@5.9.3)(zod@4.4.3))':
     dependencies:
       '@zama-fhe/relayer-sdk': 0.4.3
       zod: 4.4.3

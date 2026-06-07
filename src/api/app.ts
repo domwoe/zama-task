@@ -4,18 +4,14 @@ import { Hono } from "hono";
 import { getAddress, isAddress, type Address } from "viem";
 import { z } from "zod";
 
-import { deriveBalance, type BalanceCheckpoint } from "../balance/derive.js";
+import { deriveBalance, type DerivedBalance } from "../balance/derive.js";
 import { SEPOLIA_CHAIN_ID } from "../config.js";
-import type { Decryptor } from "../decryptor/decryptor.js";
 import { decryptionStatuses, transferKinds, type DecryptionStatus, type TransferKind } from "../types/lifecycle.js";
 import type { TokenMetadata } from "./token.js";
 import type { IndexerReadRepository, TransferDirection, TransferOrder } from "./repository.js";
 import {
-  compareTransfer,
   decodeCursor,
   encodeCursor,
-  filterAfterCursor,
-  directionFor,
   isDecryptionStatus,
   isTransferDirection,
   isTransferKind,
@@ -27,7 +23,6 @@ interface IndexerApiDependencies {
   readonly repository: IndexerReadRepository;
   readonly getTokenMetadata: () => Promise<TokenMetadata>;
   readonly getHeadBlock?: () => Promise<bigint | null>;
-  readonly decryptor?: Decryptor;
   readonly now?: () => Date;
 }
 
@@ -107,33 +102,26 @@ export const createIndexerApi = (dependencies: IndexerApiDependencies): Hono => 
     if (cached !== null) {
       return context.json({
         address,
-        balance: {
-          status: cached.status,
-          raw: cached.raw,
-          value: cached.value,
-          source: cached.source,
-          pendingTransfers: cached.pendingTransfers,
-        },
+        balance: serializeBalance(cached),
         asOfBlock: serializeBlock(asOfBlock),
         asOfTime: now().toISOString(),
       });
     }
 
     const transfers = await dependencies.repository.listBalanceTransfers(address);
-    const checkpoint = await loadCheckpoint(dependencies.decryptor, address);
     const balance = deriveBalance({
       address,
       transfers,
       decimals: token.decimals,
-      checkpoint,
+      indexedBlock: asOfBlock,
     });
-    if (balance.status === "complete") {
+    if (balance.status === "exact") {
       await dependencies.repository.writeCachedBalance(address, balance, asOfBlock, now());
     }
 
     return context.json({
       address,
-      balance,
+      balance: serializeBalance(balance),
       asOfBlock: serializeBlock(asOfBlock),
       asOfTime: now().toISOString(),
     });
@@ -151,27 +139,26 @@ export const createIndexerApi = (dependencies: IndexerApiDependencies): Hono => 
     }
 
     const token = await dependencies.getTokenMetadata();
-    const allTransfers = await dependencies.repository.listAddressTransfers(address);
-    const sorted = allTransfers
-      .filter((transfer) => query.direction === undefined || directionFor(address, transfer) === query.direction)
-      .filter((transfer) => query.kind === undefined || transfer.kind === query.kind)
-      .filter((transfer) => query.status === undefined || amountStatus(transfer) === query.status)
-      .sort(compareTransfer(query.order));
-
     const cursor = query.cursor === null ? null : decodeCursor(query.cursor);
     if (query.cursor !== null && cursor === null) {
       return errorJson(context, 400, "INVALID_CURSOR", "Cursor is malformed");
     }
 
-    const afterCursor = cursor === null ? sorted : filterAfterCursor(sorted, cursor, query.order);
-    if (cursor !== null && !sorted.some((transfer) => transfer.blockNumber === cursor.blockNumber && transfer.logIndex === cursor.logIndex)) {
+    const page = await dependencies.repository.listAddressTransferPage(address, {
+      cursor,
+      limit: query.limit + 1,
+      order: query.order,
+      ...(query.direction === undefined ? {} : { direction: query.direction }),
+      ...(query.kind === undefined ? {} : { kind: query.kind }),
+      ...(query.status === undefined ? {} : { status: query.status }),
+    });
+    if (page.cursorExpired) {
       return errorJson(context, 409, "CURSOR_EXPIRED", "Cursor anchor is no longer available");
     }
 
-    const pageRows = afterCursor.slice(0, query.limit + 1);
-    const dataRows = pageRows.slice(0, query.limit);
+    const dataRows = page.rows.slice(0, query.limit);
     const lastRow = dataRows.at(-1);
-    const hasMore = pageRows.length > query.limit;
+    const hasMore = page.rows.length > query.limit;
 
     return context.json({
       data: dataRows.map((transfer) => serializeTransfer(transfer, { decimals: token.decimals, address })),
@@ -289,25 +276,27 @@ const parseTransferQuery = (
   };
 };
 
-const loadCheckpoint = async (
-  decryptor: Decryptor | undefined,
-  address: Address,
-): Promise<BalanceCheckpoint | null> => {
-  if (decryptor === undefined) {
-    return null;
-  }
-
-  const outcome = await decryptor.decryptBalanceAs(address);
-  return outcome.kind === "success" ? { cleartextRaw: outcome.cleartextRaw } : null;
-};
-
-const amountStatus = (transfer: Parameters<typeof serializeTransfer>[0]): DecryptionStatus => {
-  if (transfer.disclosedRaw !== null) {
-    return "decrypted";
-  }
-
-  return transfer.decryption?.status ?? "encrypted";
-};
+const serializeBalance = (balance: DerivedBalance) => ({
+  status: balance.status,
+  confirmed:
+    balance.confirmed === null
+      ? null
+      : {
+          raw: balance.confirmed.raw,
+          value: balance.confirmed.value,
+          asOfBlock: serializeBlock(balance.confirmed.asOfBlock),
+          source: balance.confirmed.source,
+        },
+  pending: {
+    count: balance.pending.count,
+    inbound: balance.pending.inbound,
+    outbound: balance.pending.outbound,
+    oldestBlock: serializeBlock(balance.pending.oldestBlock),
+    byStatus: balance.pending.byStatus,
+  },
+  // Flat alias for simple consumers: the exact value, or null when unknown.
+  value: balance.confirmed?.value ?? null,
+});
 
 const serializeBlock = (block: bigint | null): number | null => {
   if (block === null) {

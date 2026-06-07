@@ -6,6 +6,11 @@ import type { DecryptionSource, DecryptionStatus, TransferKind } from "../types/
 export type TransferDirection = "in" | "out" | "self";
 export type TransferOrder = "asc" | "desc";
 
+export interface TransferCursor {
+  readonly blockNumber: bigint;
+  readonly logIndex: number;
+}
+
 export interface ApiDecryptionView {
   readonly cleartextRaw: string | null;
   readonly status: DecryptionStatus;
@@ -15,8 +20,6 @@ export interface ApiDecryptionView {
 export interface ApiTransferView extends BalanceTransferView {
   readonly id: string;
   readonly txHash: `0x${string}`;
-  readonly blockNumber: bigint;
-  readonly logIndex: number;
   readonly timestamp: bigint;
   readonly from: Address;
   readonly to: Address;
@@ -30,6 +33,17 @@ export interface TransferListFilters {
   readonly direction?: TransferDirection;
   readonly kind?: TransferKind;
   readonly status?: DecryptionStatus;
+}
+
+export interface TransferPageRequest extends TransferListFilters {
+  readonly cursor: TransferCursor | null;
+  readonly limit: number;
+  readonly order: TransferOrder;
+}
+
+export interface TransferPage {
+  readonly rows: readonly ApiTransferView[];
+  readonly cursorExpired: boolean;
 }
 
 export interface DecryptionHealthSnapshot {
@@ -56,6 +70,7 @@ export interface IndexerReadRepository {
   getIndexerCheckpoint(): Promise<IndexerCheckpointSnapshot>;
   getTransferById(id: string): Promise<ApiTransferView | null>;
   listAddressTransfers(address: Address): Promise<readonly ApiTransferView[]>;
+  listAddressTransferPage(address: Address, request: TransferPageRequest): Promise<TransferPage>;
   listBalanceTransfers(address: Address): Promise<readonly BalanceTransferView[]>;
   getCachedBalance(address: Address, asOfBlock: bigint | null): Promise<BalanceCacheView | null>;
   writeCachedBalance(address: Address, balance: DerivedBalance, asOfBlock: bigint | null, updatedAt: Date): Promise<void>;

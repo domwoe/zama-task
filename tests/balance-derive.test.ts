@@ -9,6 +9,7 @@ import {
   formatBaseUnitValue,
   type BalanceTransferView,
 } from "../src/balance/derive.js";
+import type { DecryptionStatus } from "../src/types/lifecycle.js";
 
 const alice = "0x5000000000000000000000000000000000000000";
 const bob = "0x6000000000000000000000000000000000000000";
@@ -18,79 +19,87 @@ const transfer = (
   from: Address,
   to: Address,
   cleartextRaw: string | null,
+  block: number,
+  pendingStatus: DecryptionStatus = "encrypted",
 ): BalanceTransferView => ({
   id,
+  blockNumber: BigInt(block),
+  logIndex: 0,
   from,
   to,
   disclosedRaw: cleartextRaw,
   decryption:
-    cleartextRaw === null
-      ? null
-      : {
-          cleartextRaw,
-          status: "decrypted",
-          source: "userDecrypt",
-        },
+    cleartextRaw !== null
+      ? { cleartextRaw, status: "decrypted", source: "userDecrypt" }
+      : pendingStatus === "encrypted"
+        ? null
+        : { cleartextRaw: null, status: pendingStatus, source: "userDecrypt" },
 });
 
 describe("deriveBalance", () => {
-  it("sums signed cleartext deltas without mutating a counter", () => {
+  it("is exact when the whole history is valued (signed sum, no mutable counter)", () => {
     const balance = deriveBalance({
       address: alice,
       decimals: 0,
+      indexedBlock: 4n,
       transfers: [
-        transfer("mint", zeroAddress, alice, "100"),
-        transfer("out", alice, bob, "30"),
-        transfer("in", bob, alice, "10"),
-        transfer("burn", alice, zeroAddress, "5"),
+        transfer("mint", zeroAddress, alice, "100", 1),
+        transfer("out", alice, bob, "30", 2),
+        transfer("in", bob, alice, "10", 3),
+        transfer("burn", alice, zeroAddress, "5", 4),
       ],
     });
 
     expect(balance).toEqual({
-      status: "complete",
-      raw: "75",
-      value: "75",
-      source: "derived",
-      pendingTransfers: 0,
+      status: "exact",
+      confirmed: { raw: "75", value: "75", asOfBlock: 4n, source: "derived" },
+      pending: { count: 0, inbound: 0, outbound: 0, oldestBlock: null, byStatus: {} },
     });
   });
 
-  it("returns a partial derived balance when an affecting transfer lacks cleartext", () => {
+  it("is exact 0 for an address with no transfers", () => {
+    const balance = deriveBalance({ address: alice, decimals: 0, indexedBlock: 9n, transfers: [] });
+
+    expect(balance).toEqual({
+      status: "exact",
+      confirmed: { raw: "0", value: "0", asOfBlock: 9n, source: "derived" },
+      pending: { count: 0, inbound: 0, outbound: 0, oldestBlock: null, byStatus: {} },
+    });
+  });
+
+  it("is as_of (exact, earlier block) when a newer transfer is still pending", () => {
     const balance = deriveBalance({
       address: alice,
       decimals: 0,
+      indexedBlock: 2n,
       transfers: [
-        transfer("mint", zeroAddress, alice, "100"),
-        transfer("unknown-out", alice, bob, null),
+        transfer("mint", zeroAddress, alice, "100", 1),
+        transfer("pending-out", alice, bob, null, 2),
       ],
     });
 
     expect(balance).toEqual({
-      status: "partial",
-      raw: "100",
-      value: "100",
-      source: "derived",
-      pendingTransfers: 1,
+      status: "as_of",
+      confirmed: { raw: "100", value: "100", asOfBlock: 1n, source: "derived" },
+      pending: { count: 1, inbound: 0, outbound: 1, oldestBlock: 2n, byStatus: { encrypted: 1 } },
     });
   });
 
-  it("uses a checkpoint raw total for partial balances when available", () => {
+  it("is unknown (no anchor) when the earliest affecting transfer is un-valued", () => {
     const balance = deriveBalance({
       address: alice,
-      decimals: 6,
-      checkpoint: { cleartextRaw: "70000000" },
+      decimals: 0,
+      indexedBlock: 2n,
       transfers: [
-        transfer("mint", zeroAddress, alice, "100000000"),
-        transfer("unknown-out", alice, bob, null),
+        transfer("unauthorized-in", bob, alice, null, 1, "unauthorized"),
+        transfer("later-mint", zeroAddress, alice, "100", 2),
       ],
     });
 
     expect(balance).toEqual({
-      status: "partial",
-      raw: "70000000",
-      value: "70.0",
-      source: "checkpoint",
-      pendingTransfers: 1,
+      status: "unknown",
+      confirmed: null,
+      pending: { count: 1, inbound: 1, outbound: 0, oldestBlock: 1n, byStatus: { unauthorized: 1 } },
     });
   });
 

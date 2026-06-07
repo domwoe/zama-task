@@ -19,6 +19,7 @@ import { createDrainerTablesSql } from "../db/drainer-schema.js";
 import { balanceTrustLevels, breakerStates, decryptionSources, decryptionStatuses, transferKinds } from "../types/lifecycle.js";
 import type { DecryptionRow, DrainerStateRow } from "../db/drainer-schema.js";
 import type { SdkStorageRecordStore } from "../decryptor/generic-storage.js";
+import { deserializeSdkStorageValue, serializeSdkStorageValue } from "../decryptor/generic-storage.js";
 import { compareDrainerTransfer, orderedTransferCandidates } from "../drainer/store.js";
 import type {
   ActiveDelegationQuery,
@@ -26,6 +27,7 @@ import type {
   DrainerStore,
   DrainerTransfer,
   DrainerWorkItem,
+  NudgeQuery,
 } from "../drainer/store.js";
 import type {
   ApiDecryptionView,
@@ -409,8 +411,18 @@ export class RawSqlSideTableRepository implements IndexerReadRepository, Drainer
     );
   }
 
-  async nudgeUnauthorizedForActiveDelegations(query: Omit<ActiveDelegationQuery, "delegators">): Promise<number> {
-    const rows = await this.#fetchDecryptionRowsByStatus("unauthorized");
+  async nudgeRetryableForActiveDelegations(query: NudgeQuery): Promise<number> {
+    // `unauthorized` rows always re-arm once a delegation is active; `failed` rows
+    // do too, but only while under the attempt cap, so a genuinely dead handle
+    // eventually settles on the long backstop instead of retrying every tick.
+    const [unauthorized, failed] = await Promise.all([
+      this.#fetchDecryptionRowsByStatus("unauthorized"),
+      this.#fetchDecryptionRowsByStatus("failed"),
+    ]);
+    const rows = [
+      ...unauthorized,
+      ...failed.filter((row) => row.attempts < query.failedMaxAttempts),
+    ];
     let nudged = 0;
 
     for (const row of rows) {
@@ -424,7 +436,12 @@ export class RawSqlSideTableRepository implements IndexerReadRepository, Drainer
       }
 
       const candidates = orderedTransferCandidates(transfer);
-      const active = await this.listActiveDelegators({ ...query, delegators: candidates });
+      const active = await this.listActiveDelegators({
+        delegators: candidates,
+        delegate: query.delegate,
+        contractAddress: query.contractAddress,
+        at: query.at,
+      });
       if (active.length === 0) {
         continue;
       }
@@ -488,13 +505,13 @@ export class RawSqlSideTableRepository implements IndexerReadRepository, Drainer
       return null;
     }
 
-    return JSON.parse(parsed.data.value) as unknown;
+    return deserializeSdkStorageValue(parsed.data.value);
   }
 
   async set(key: string, value: unknown): Promise<void> {
     await this.#db.execute(sql`
       INSERT INTO sdk_credentials (key, value, updated_at)
-      VALUES (${key}, ${JSON.stringify(value)}, ${new Date().toISOString()})
+      VALUES (${key}, ${serializeSdkStorageValue(value)}, ${new Date().toISOString()})
       ON CONFLICT (key) DO UPDATE SET
         value = EXCLUDED.value,
         updated_at = EXCLUDED.updated_at

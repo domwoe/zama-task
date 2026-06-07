@@ -9,6 +9,7 @@ import type {
   DrainerStore,
   DrainerTransfer,
   DrainerWorkItem,
+  NudgeQuery,
 } from "./store.js";
 
 interface InMemoryDrainerStoreOptions {
@@ -19,6 +20,13 @@ interface InMemoryDrainerStoreOptions {
 }
 
 const addressKey = (address: Address): string => getAddress(address).toLowerCase();
+
+// `unauthorized` rows always re-arm once a delegation is active; `failed` rows do
+// too, but only until their attempt count reaches the cap, so a genuinely dead
+// handle eventually settles on the long backstop instead of retrying every tick.
+const isNudgeable = (row: DecryptionRow, query: NudgeQuery): boolean =>
+  row.status === "unauthorized" ||
+  (row.status === "failed" && row.attempts < query.failedMaxAttempts);
 
 const rowForWrite = (row: DecryptionWrite): DecryptionRow => ({
   amountHandle: row.amountHandle,
@@ -142,11 +150,11 @@ export class InMemoryDrainerStore implements DrainerStore {
     return Promise.resolve(active);
   }
 
-  nudgeUnauthorizedForActiveDelegations(query: Omit<ActiveDelegationQuery, "delegators">): Promise<number> {
+  nudgeRetryableForActiveDelegations(query: NudgeQuery): Promise<number> {
     let nudged = 0;
 
     for (const row of this.#decryptions.values()) {
-      if (row.status !== "unauthorized" || row.nextAttemptAt <= query.at) {
+      if (!isNudgeable(row, query) || row.nextAttemptAt <= query.at) {
         continue;
       }
 

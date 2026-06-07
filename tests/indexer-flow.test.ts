@@ -7,13 +7,17 @@ import { DecryptionDrainer } from "../src/drainer/drainer.js";
 import { InMemoryDrainerStore } from "../src/drainer/in-memory-store.js";
 import type { DrainerDelegation, DrainerTransfer } from "../src/drainer/store.js";
 import { createIndexerApi } from "../src/api/app.js";
+import { compareTransfer, directionFor, filterAfterCursor } from "../src/api/serialization.js";
 import type {
   ApiTransferView,
   DecryptionHealthSnapshot,
   IndexerCheckpointSnapshot,
   IndexerReadRepository,
+  TransferPage,
+  TransferPageRequest,
 } from "../src/api/repository.js";
 import type { TokenMetadata } from "../src/api/token.js";
+import type { DecryptionStatus } from "../src/types/lifecycle.js";
 
 const now = new Date("2026-06-05T12:00:00.000Z");
 const tokenAddress = "0x1000000000000000000000000000000000000000";
@@ -64,6 +68,28 @@ class FlowRepository implements IndexerReadRepository {
         .filter((transfer) => transfer.from.toLowerCase() === lower || transfer.to.toLowerCase() === lower)
         .map((transfer) => this.#toApiTransfer(transfer)),
     );
+  }
+
+  async listAddressTransferPage(address: Address, request: TransferPageRequest): Promise<TransferPage> {
+    const rows = (await this.listAddressTransfers(address))
+      .filter((transfer) => request.direction === undefined || directionFor(address, transfer) === request.direction)
+      .filter((transfer) => request.kind === undefined || transfer.kind === request.kind)
+      .filter((transfer) => request.status === undefined || amountStatus(transfer) === request.status)
+      .sort(compareTransfer(request.order));
+
+    const cursorExpired =
+      request.cursor !== null &&
+      !rows.some(
+        (transfer) =>
+          transfer.blockNumber === request.cursor?.blockNumber &&
+          transfer.logIndex === request.cursor.logIndex,
+      );
+    const afterCursor = request.cursor === null ? rows : filterAfterCursor(rows, request.cursor, request.order);
+
+    return {
+      rows: afterCursor.slice(0, request.limit),
+      cursorExpired,
+    };
   }
 
   listBalanceTransfers(address: Address): Promise<readonly BalanceTransferView[]> {
@@ -118,6 +144,14 @@ const transfer = (): DrainerTransfer => ({
   amountHandle: handle,
   disclosedRaw: null,
 });
+
+const amountStatus = (transfer: ApiTransferView): DecryptionStatus => {
+  if (transfer.disclosedRaw !== null) {
+    return "decrypted";
+  }
+
+  return transfer.decryption?.status ?? "encrypted";
+};
 
 const delegation = (): DrainerDelegation => ({
   delegator: recipient,
@@ -208,7 +242,7 @@ describe("fake indexer flow", () => {
     expect(bodyBefore.data[0]).toMatchObject({ id: row.id, amount: { status: "unauthorized", raw: null } });
 
     // Phase 2: holder grants ACL delegation → both store (on-chain state) and decryptor (relayer) updated.
-    // nudgeUnauthorizedForActiveDelegations at the start of processOnce resets nextAttemptAt from the
+    // nudgeRetryableForActiveDelegations at the start of processOnce resets nextAttemptAt from the
     // far-future backstop to now, making the row immediately eligible for the work query.
     store.addDelegation(delegation());
     decryptor.grantDelegation(recipient);

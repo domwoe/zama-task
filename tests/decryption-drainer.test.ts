@@ -115,6 +115,107 @@ describe("DecryptionDrainer", () => {
     });
   });
 
+  it("retries an unknown relayer error as pending, then succeeds on the next tick", async () => {
+    // Fix A: an unrecognized ("unknown") error — e.g. the relayer not yet seeing a
+    // freshly-minted handle — must stay retryable (pending), not become terminal failed.
+    const store = new InMemoryDrainerStore({
+      transfers: [transfer()],
+      delegations: [delegation(recipient)],
+    });
+    let calls = 0;
+    const decryptor = {
+      decryptTransferAmountAs(): Promise<DecryptOutcome> {
+        calls += 1;
+        if (calls === 1) {
+          return Promise.resolve({
+            kind: "failure",
+            failure: "unknown",
+            errorCode: "UNKNOWN",
+            message: "unrecognized relayer error",
+          });
+        }
+        return Promise.resolve({ kind: "success", cleartextRaw: "55" });
+      },
+      decryptBalanceAs(): Promise<DecryptOutcome> {
+        return Promise.resolve({ kind: "failure", failure: "unknown", errorCode: "UNUSED", message: "unused" });
+      },
+    };
+    const drainer = new DecryptionDrainer({
+      store,
+      decryptor,
+      indexerAddress,
+      tokenAddress,
+      relayerMinDelayMs: 0,
+      now: () => now,
+      random: () => 0,
+    });
+
+    const first = await drainer.processOnce();
+    expect(first).toMatchObject({ processed: 1, failed: 0, pending: 1 });
+    expect(store.getDecryption(handle)).toMatchObject({ status: "pending", lastErrorCode: "UNKNOWN" });
+
+    const second = await drainer.processOnce();
+    expect(second).toMatchObject({ processed: 1, decrypted: 1 });
+    expect(store.getDecryption(handle)).toMatchObject({ status: "decrypted", cleartextRaw: "55" });
+  });
+
+  it("re-arms an already-failed row once a delegation is active", async () => {
+    // Fix B: a row stuck in `failed` (with a far-future backstop) is re-armed by the
+    // delegation nudge so it retries promptly instead of waiting out the backstop.
+    const store = new InMemoryDrainerStore({
+      transfers: [transfer()],
+      decryptions: [
+        {
+          amountHandle: handle,
+          cleartextRaw: null,
+          status: "failed",
+          decryptedFor: null,
+          source: null,
+          attempts: 2,
+          nextAttemptAt: new Date(now.getTime() + 3_600_000),
+          lastErrorCode: "DECRYPTION_FAILED",
+          lastErrorAt: now,
+        },
+      ],
+    });
+    const decryptor = new FakeDecryptor({
+      handles: new Map([[handle, { cleartext: 9n, allowedAccounts: new Set<Address>([recipient]) }]]),
+    });
+    const drainer = createDrainer(store, decryptor);
+
+    store.addDelegation(delegation(recipient));
+    decryptor.grantDelegation(recipient);
+
+    const result = await drainer.processOnce();
+    expect(result).toMatchObject({ processed: 1, decrypted: 1, nudged: 1 });
+    expect(store.getDecryption(handle)).toMatchObject({ status: "decrypted", cleartextRaw: "9" });
+  });
+
+  it("stops re-arming a failed row once it exceeds the nudge attempt cap", async () => {
+    const store = new InMemoryDrainerStore({
+      transfers: [transfer()],
+      delegations: [delegation(recipient)],
+      decryptions: [
+        {
+          amountHandle: handle,
+          cleartextRaw: null,
+          status: "failed",
+          decryptedFor: null,
+          source: null,
+          attempts: 12,
+          nextAttemptAt: new Date(now.getTime() + 3_600_000),
+          lastErrorCode: "DECRYPTION_FAILED",
+          lastErrorAt: now,
+        },
+      ],
+    });
+    const decryptor = new FakeDecryptor({ handles: new Map() });
+    const result = await createDrainer(store, decryptor).processOnce();
+
+    expect(result.nudged).toBe(0);
+    expect(store.getDecryption(handle)).toMatchObject({ status: "failed" });
+  });
+
   it("does not call the relayer when no candidate has an active delegation", async () => {
     let relayerCalls = 0;
     const store = new InMemoryDrainerStore({

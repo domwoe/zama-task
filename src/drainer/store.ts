@@ -45,12 +45,20 @@ export interface ActiveDelegationQuery {
   readonly at: Date;
 }
 
+export interface NudgeQuery {
+  readonly delegate: Address;
+  readonly contractAddress: Address;
+  readonly at: Date;
+  /** A `failed` row is only re-armed while its attempt count is below this cap. */
+  readonly failedMaxAttempts: number;
+}
+
 export interface DrainerStore {
   listDueTransfers(now: Date, limit: number): Promise<readonly DrainerWorkItem[]>;
   seedEncryptedDecryption(amountHandle: `0x${string}`, now: Date): Promise<DecryptionRow>;
   writeDecryption(row: DecryptionWrite): Promise<void>;
   listActiveDelegators(query: ActiveDelegationQuery): Promise<readonly Address[]>;
-  nudgeUnauthorizedForActiveDelegations(query: Omit<ActiveDelegationQuery, "delegators">): Promise<number>;
+  nudgeRetryableForActiveDelegations(query: NudgeQuery): Promise<number>;
   getDrainerState(): Promise<DrainerStateRow>;
   writeDrainerState(row: DrainerStateRow): Promise<void>;
 }

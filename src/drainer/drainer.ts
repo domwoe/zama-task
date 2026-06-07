@@ -35,6 +35,9 @@ export interface RetryPolicy {
   readonly unauthorizedBackstopMs: number;
   readonly failedBackstopMs: number;
   readonly staleCredentialRetryMs: number;
+  /** Cap on how many times a `failed` row may be re-armed by the delegation nudge
+   * before it falls back to the long backstop — bounds retries of a dead handle. */
+  readonly failedNudgeMaxAttempts: number;
 }
 
 export interface DecryptionDrainerRunResult {
@@ -60,6 +63,7 @@ const defaultRetryPolicy: RetryPolicy = {
   unauthorizedBackstopMs: 600_000,
   failedBackstopMs: 3_600_000,
   staleCredentialRetryMs: 0,
+  failedNudgeMaxAttempts: 12,
 };
 
 const defaultSleep = (milliseconds: number): Promise<void> =>
@@ -117,10 +121,11 @@ export class DecryptionDrainer {
       await this.#writeBreakerState("halfOpen", now);
     }
 
-    const nudged = await this.#store.nudgeUnauthorizedForActiveDelegations({
+    const nudged = await this.#store.nudgeRetryableForActiveDelegations({
       delegate: this.#indexerAddress,
       contractAddress: this.#tokenAddress,
       at: now,
+      failedMaxAttempts: this.#retryPolicy.failedNudgeMaxAttempts,
     });
     const work = await this.#store.listDueTransfers(now, this.#batchSize);
     const results = await mapLimited(work, this.#concurrency, (item) => this.#processWorkItem(item, now));
@@ -325,11 +330,11 @@ export class DecryptionDrainer {
       case "relayerRateLimited":
       case "relayerUnavailable":
       case "aclPaused":
+      case "unknown":
         return jitteredExpBackoff(this.#retryPolicy.baseMs, this.#retryPolicy.maxMs, attempts, this.#random);
       case "staleCredentials":
         return this.#retryPolicy.staleCredentialRetryMs;
       case "decryptionFailed":
-      case "unknown":
         return this.#retryPolicy.failedBackstopMs;
     }
   }
@@ -345,16 +350,25 @@ export const startDecryptionDrainer = (
   drainer: DecryptionDrainer,
   options: {
     readonly intervalMs?: number;
+    readonly onError?: (error: unknown) => void;
+    readonly onResult?: (result: DecryptionDrainerRunResult) => void;
     readonly sleep?: (milliseconds: number) => Promise<void>;
   } = {},
 ): RunningDecryptionDrainer => {
+  const onError = options.onError;
+  const onResult = options.onResult;
   const sleep = options.sleep ?? defaultSleep;
   const intervalMs = options.intervalMs ?? 5_000;
   const state = { stopped: false };
 
   const done = (async () => {
     while (!state.stopped) {
-      await drainer.processOnce();
+      try {
+        const result = await drainer.processOnce();
+        onResult?.(result);
+      } catch (error) {
+        onError?.(error);
+      }
       await sleep(intervalMs);
     }
   })();
@@ -374,9 +388,13 @@ const statusForFailure = (
   switch (failure) {
     case "unauthorized":
       return "unauthorized";
+    // Only a positively-identified DECRYPTION_FAILED is terminal. An `unknown`
+    // (unrecognized) error is treated as transient and retried — typically it's
+    // the relayer/KMS not yet seeing a freshly-minted handle right after the
+    // event, which resolves on its own once propagation catches up.
     case "decryptionFailed":
-    case "unknown":
       return "failed";
+    case "unknown":
     case "propagationLag":
     case "relayerRateLimited":
     case "relayerUnavailable":

@@ -84,24 +84,61 @@ Token metadata so the wallet can render symbol/decimals.
 ```
 
 ### `GET /v1/addresses/{address}/balance`
-Current cleartext balance for an address.
-```json
+Current cleartext balance for an address. Because every cleartext is relayer-decrypted
+and therefore lagging, a single "current balance" scalar is impossible to give
+honestly. Instead the balance is **a confirmed exact figure as of a block, plus the
+set of transfers we can see but cannot yet value**.
+```jsonc
 {
   "address": "0x…",
   "balance": {
-    "status": "complete",     // complete | partial | unavailable
-    "raw": "40000000",
-    "value": "40.0",
-    "source": "derived",      // derived (running sum) | checkpoint (on-chain handle)
-    "pendingTransfers": 0      // undecrypted transfers affecting this address; >0 ⇒ partial
+    "status": "as_of",                 // exact | as_of | unknown
+    "confirmed": {                      // exact, zero-anchored total — or null
+      "raw": "40000000",
+      "value": "40.0",
+      "asOfBlock": 1234560,            // anchor: last gap-free valued block (exact ⇒ indexed head)
+      "source": "derived"             // derived | checkpoint (checkpoint reserved for the D2 seal)
+    },
+    "pending": {                        // affecting transfers we can't yet value
+      "count": 1, "inbound": 0, "outbound": 1,
+      "oldestBlock": 1234561,
+      "byStatus": { "unauthorized": 1 } // why we can't value them
+    },
+    "value": "40.0"                     // flat alias = confirmed.value, or null
   },
   "asOfBlock": 1234567,
   "asOfTime": "2026-06-05T12:00:00Z"
 }
 ```
-`balance.status` makes the Decision 7 honesty rule observable: if any transfer
-affecting the address is still undecrypted, the balance is `partial` (and `value`
-is the best-known total or the on-chain checkpoint), never a confident wrong number.
+
+`status` is a **trust level for `confirmed`** — and *only* that; the reason a balance
+isn't current/known lives in `pending.byStatus`, never folded into `status`:
+
+| status | meaning | `confirmed` |
+| --- | --- | --- |
+| `exact` | confirmed is the current balance (no affecting transfer is still un-valued) | present, `asOfBlock` = indexed head |
+| `as_of` | confirmed is **exact but as of `asOfBlock`**; newer transfers are pending | present |
+| `unknown` | no zero-anchored exact figure (the earliest affecting transfer is un-valued, no checkpoint) | **`null`** |
+
+Key properties:
+- **`confirmed.value` is never a lower bound.** It is the exact net of the maximal
+  *gap-free valued prefix* of history — we stop summing at the first un-valued
+  transfer, so a hidden amount can never silently shrink it. This is the per-amount
+  "`null`, never `0`" rule applied to balances.
+- **`pending` describes what we can't value yet** — `count`, the `inbound`/`outbound`
+  split (direction is known from the indexed `from`/`to` even without the amount),
+  `oldestBlock`, and `byStatus` (`unauthorized` ⇒ a delegation is needed; `pending`/
+  `encrypted` ⇒ the drainer is catching up; `failed` ⇒ wedged, still retrying).
+- **`unknown` ≠ empty.** An address with no transfers is `exact` with `value: "0.0"`
+  (provably zero); `unknown` (`value: null`) means "active, but we can't anchor a
+  number" — the pre-delegation state. These are deliberately distinguishable.
+- **Zero-anchor caveat.** A `source: "derived"` figure assumes the address held zero
+  before the earliest *indexed* transfer — true when indexing from the token's deploy,
+  or for addresses whose first activity we observed (e.g. a freshly-funded holder). For
+  a pre-existing holder on a late `START_BLOCK`, the derived prefix is a *delta*, not a
+  balance; supplying the absolute anchor is exactly the job of the **checkpoint seal**
+  (`source: "checkpoint"`), a documented follow-up (DECISIONS D7). Until then such
+  addresses are reported `unknown` rather than with a wrong number.
 
 ### `GET /v1/addresses/{address}/transfers`
 Transfer history with cleartext amounts where available.
@@ -193,42 +230,3 @@ One envelope everywhere:
 **An unknown address is not a 404** — it returns an empty transfer list / zero
 balance. Every address is a valid query target; only unknown routes and transfer
 ids are 404.
-
-## Open questions for the partner (feedback wanted)
-
-These are genuine product choices we should not make unilaterally — they affect
-wallet UX and we'd rather surface them than guess:
-
-1. **Show or hide zero-amount (failed) transfers?** Overspend attempts emit
-   `ConfidentialTransfer(from, to, 0)` (Decision 7). Default proposal: **include**
-   them with `kind: "transfer"` and `value: "0"` so history matches the chain, but
-   provide `?includeZero=false` to hide. Does the wallet want them in the feed?
-2. **`partial` balance — checkpoint or lower bound?** When some transfers are
-   undecrypted, should `balance.value` be the **on-chain checkpoint total**
-   (accurate total, but you can't see the matching line items) or the
-   **decrypted-so-far lower bound** (matches the visible history, but understates)?
-   We lean checkpoint-total + `pendingTransfers > 0`, but this is a UX call.
-3. **Pagination over a moving tip.** Default is keyset newest-first; a long-lived
-   cursor near the head will see new rows arrive. Acceptable, or does the partner
-   want a snapshot/`asOfBlock`-pinned cursor?
-4. **Cursor TTL.** Alchemy expires `pageKey` after 10 min. Our keyset cursor has no
-   server state, so it need not expire — but it *can* be invalidated by a reorg
-   (`CURSOR_EXPIRED`). Confirm the partner is fine with stateless, non-expiring
-   cursors.
-5. **Shield visibility before delegation?** A shield/wrap mint carries an
-   *encrypted* handle and has **no** dedicated public event, so by default it shows
-   `encrypted`/`unauthorized` until the holder delegates and it backfills (Decision
-   7) — even though the wrap amount is technically public on-chain. We *could*
-   correlate the public amount (tx-input / underlying ERC-20 transfer + `rate()`)
-   to show shields immediately, at the cost of brittle correlation and
-   display-only values that can round-drift from the minted handle. Worth it, or is
-   delegated-decrypt-then-backfill acceptable for the on-ramp?
-
-## Mapping to decisions
-
-| API element | Decision |
-| --- | --- |
-| `amount.status` enum, `/transfers/{id}` polling | D2 (state machine), D6 (backfill) |
-| `balance.source` / `partial`, `kind`, `amount.source` | D7 (provenance, running-sum + checkpoint) |
-| `/health` lag vs backlog split | D2, D7 |
-| Sepolia-only delegated decryption affecting `pending`/`unauthorized` | D5, D6 |

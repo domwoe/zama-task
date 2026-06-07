@@ -1,12 +1,29 @@
 import { eq } from "ponder";
 import { ponder } from "ponder:registry";
 import { delegations, transfers, unwraps } from "ponder:schema";
-import { getAddress, zeroAddress } from "viem";
+import { getAddress, parseEventLogs, zeroAddress } from "viem";
 
 import { confidentialTokenWithWrapperAbi } from "./abi/confidential-token.js";
-import { underlyingToWrappedRaw } from "./balance/rate.js";
+import { shieldDisclosedRaw, underlyingToWrappedRaw, type UnderlyingDeposit } from "./balance/rate.js";
 import { env } from "./config.js";
 import type { TransferKind } from "./types/lifecycle.js";
+
+// Minimal ERC-20 `Transfer` ABI, used to spot the underlying deposit that funds a
+// shield mint within the same transaction (Decision 7, shield valuation).
+const erc20TransferAbi = [
+  {
+    type: "event",
+    name: "Transfer",
+    inputs: [
+      { name: "from", type: "address", indexed: true },
+      { name: "to", type: "address", indexed: true },
+      { name: "value", type: "uint256", indexed: false },
+    ],
+  },
+] as const;
+
+// The wrapper's underlying ERC-20 is immutable; resolve it once and reuse.
+let underlyingAddressPromise: Promise<`0x${string}`> | undefined;
 
 const transferId = (txHash: `0x${string}`, logIndex: number): string => {
   return `${txHash}-${logIndex.toString()}`;
@@ -38,30 +55,60 @@ const sameAddress = (left: `0x${string}`, right: `0x${string}`): boolean => {
 
 ponder.on("ConfidentialToken:ConfidentialTransfer", async ({ event, context }) => {
   const id = transferId(event.transaction.hash, event.log.logIndex);
+  const kind = transferKind(event.args.from, event.args.to);
 
-  await context.db
-    .insert(transfers)
-    .values({
-      id,
-      txHash: event.transaction.hash,
-      blockNumber: event.block.number,
-      logIndex: event.log.logIndex,
-      timestamp: event.block.timestamp,
-      from: event.args.from,
-      to: event.args.to,
-      kind: transferKind(event.args.from, event.args.to),
-      amountHandle: event.args.amount,
-    })
-    .onConflictDoUpdate({
-      txHash: event.transaction.hash,
-      blockNumber: event.block.number,
-      logIndex: event.log.logIndex,
-      timestamp: event.block.timestamp,
-      from: event.args.from,
-      to: event.args.to,
-      kind: transferKind(event.args.from, event.args.to),
-      amountHandle: event.args.amount,
-    });
+  // A shield (mint from 0x0) deposits a *public* amount of underlying ERC-20 into
+  // the wrapper, so we value it from that deposit instead of decrypting it — see
+  // Decision 7. Best-effort: any failure leaves it for the delegated decrypt path
+  // rather than blocking indexing or dropping the event.
+  let disclosedRaw: string | null = null;
+  if (kind === "shield") {
+    try {
+      const block = event.block.number;
+      underlyingAddressPromise ??= context.client
+        .readContract({
+          address: env.tokenAddress,
+          abi: confidentialTokenWithWrapperAbi,
+          functionName: "underlying",
+          blockNumber: block,
+        })
+        .then((address) => getAddress(address));
+      const underlying = await underlyingAddressPromise;
+
+      const receipt = await context.client.getTransactionReceipt({ hash: event.transaction.hash });
+      const deposits: UnderlyingDeposit[] = parseEventLogs({
+        abi: erc20TransferAbi,
+        eventName: "Transfer",
+        logs: receipt.logs,
+      })
+        .filter((log) => sameAddress(log.address, underlying))
+        .map((log) => ({ to: log.args.to, value: log.args.value }));
+
+      const rate = await context.client.readContract({
+        address: env.tokenAddress,
+        abi: confidentialTokenWithWrapperAbi,
+        functionName: "rate",
+        blockNumber: block,
+      });
+      disclosedRaw = shieldDisclosedRaw(deposits, env.tokenAddress, rate);
+    } catch (error) {
+      console.warn(`Shield public valuation failed for ${id}; falling back to decrypt`, error);
+    }
+  }
+
+  const fields = {
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    logIndex: event.log.logIndex,
+    timestamp: event.block.timestamp,
+    from: event.args.from,
+    to: event.args.to,
+    kind,
+    amountHandle: event.args.amount,
+    ...(disclosedRaw === null ? {} : { disclosedRaw, disclosedSource: "disclosed" as const }),
+  };
+
+  await context.db.insert(transfers).values({ id, ...fields }).onConflictDoUpdate(fields);
 });
 
 ponder.on("ConfidentialToken:AmountDisclosed", async ({ event, context }) => {

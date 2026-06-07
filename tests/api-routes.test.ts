@@ -3,14 +3,18 @@ import { zeroAddress, type Address } from "viem";
 
 import type { BalanceTransferView, DerivedBalance } from "../src/balance/derive.js";
 import { createIndexerApi } from "../src/api/app.js";
+import { compareTransfer, directionFor, filterAfterCursor } from "../src/api/serialization.js";
 import type {
   ApiTransferView,
   BalanceCacheView,
   DecryptionHealthSnapshot,
   IndexerCheckpointSnapshot,
   IndexerReadRepository,
+  TransferPage,
+  TransferPageRequest,
 } from "../src/api/repository.js";
 import type { TokenMetadata } from "../src/api/token.js";
+import type { DecryptionStatus } from "../src/types/lifecycle.js";
 
 const token: TokenMetadata = {
   chainId: 11155111,
@@ -76,6 +80,28 @@ class MemoryRepository implements IndexerReadRepository {
     );
   }
 
+  async listAddressTransferPage(address: Address, request: TransferPageRequest): Promise<TransferPage> {
+    const rows = (await this.listAddressTransfers(address))
+      .filter((transfer) => request.direction === undefined || directionFor(address, transfer) === request.direction)
+      .filter((transfer) => request.kind === undefined || transfer.kind === request.kind)
+      .filter((transfer) => request.status === undefined || amountStatus(transfer) === request.status)
+      .sort(compareTransfer(request.order));
+
+    const cursorExpired =
+      request.cursor !== null &&
+      !rows.some(
+        (transfer) =>
+          transfer.blockNumber === request.cursor?.blockNumber &&
+          transfer.logIndex === request.cursor.logIndex,
+      );
+    const afterCursor = request.cursor === null ? rows : filterAfterCursor(rows, request.cursor, request.order);
+
+    return {
+      rows: afterCursor.slice(0, request.limit),
+      cursorExpired,
+    };
+  }
+
   listBalanceTransfers(address: Address): Promise<readonly BalanceTransferView[]> {
     return this.listAddressTransfers(address);
   }
@@ -121,6 +147,14 @@ const transfer = (overrides: Partial<ApiTransferView>): ApiTransferView => ({
   ...overrides,
 });
 
+const amountStatus = (transfer: ApiTransferView): DecryptionStatus => {
+  if (transfer.disclosedRaw !== null) {
+    return "decrypted";
+  }
+
+  return transfer.decryption?.status ?? "encrypted";
+};
+
 const appWith = (transfers: readonly ApiTransferView[], options: Omit<MemoryRepositoryOptions, "transfers"> = {}) =>
   createIndexerApi({
     repository: new MemoryRepository({ ...options, transfers }),
@@ -136,20 +170,39 @@ describe("createIndexerApi", () => {
     await expect(response.json()).resolves.toEqual(token);
   });
 
-  it("returns a derived partial balance for unknown cleartext", async () => {
+  it("returns an as_of balance: confirmed figure plus a pending summary", async () => {
+    const app = appWith([
+      transfer({ id: "known-in", from: zeroAddress, to: alice, blockNumber: 10n, logIndex: 0, disclosedRaw: "100000000", decryption: null }),
+      transfer({ id: "pending-out", from: alice, to: bob, blockNumber: 11n, logIndex: 0, decryption: null }),
+    ]);
+
+    const response = await app.request(`/v1/addresses/${alice}/balance`);
+    const body = await response.json() as {
+      readonly balance: {
+        readonly status: string;
+        readonly value: string | null;
+        readonly confirmed: { readonly raw: string; readonly value: string; readonly asOfBlock: number; readonly source: string } | null;
+        readonly pending: { readonly count: number; readonly outbound: number; readonly oldestBlock: number };
+      };
+    };
+
+    expect(body.balance).toMatchObject({
+      status: "as_of",
+      value: "100.0",
+      confirmed: { raw: "100000000", value: "100.0", asOfBlock: 10, source: "derived" },
+      pending: { count: 1, outbound: 1, oldestBlock: 11 },
+    });
+  });
+
+  it("returns an unknown balance when the earliest affecting transfer is un-valued", async () => {
     const app = appWith([
       transfer({
-        id: "known-in",
-        from: zeroAddress,
+        id: "unauthorized-in",
+        from: bob,
         to: alice,
-        disclosedRaw: "100000000",
-        decryption: null,
-      }),
-      transfer({
-        id: "unknown-out",
-        from: alice,
-        to: bob,
-        decryption: null,
+        blockNumber: 10n,
+        logIndex: 0,
+        decryption: { cleartextRaw: null, status: "unauthorized", source: "userDecrypt" },
       }),
     ]);
 
@@ -157,26 +210,26 @@ describe("createIndexerApi", () => {
     const body = await response.json() as {
       readonly balance: {
         readonly status: string;
-        readonly raw: string;
-        readonly pendingTransfers: number;
+        readonly value: string | null;
+        readonly confirmed: unknown;
+        readonly pending: { readonly count: number; readonly inbound: number; readonly byStatus: Record<string, number> };
       };
     };
 
     expect(body.balance).toMatchObject({
-      status: "partial",
-      raw: "100000000",
-      pendingTransfers: 1,
+      status: "unknown",
+      value: null,
+      confirmed: null,
+      pending: { count: 1, inbound: 1, byStatus: { unauthorized: 1 } },
     });
   });
 
   it("uses the cached balance when it matches the current indexed block", async () => {
     const app = appWith([], {
       cachedBalance: {
-        status: "complete",
-        raw: "42000000",
-        value: "42.0",
-        source: "derived",
-        pendingTransfers: 0,
+        status: "exact",
+        confirmed: { raw: "42000000", value: "42.0", asOfBlock: 12n, source: "derived" },
+        pending: { count: 0, inbound: 0, outbound: 0, oldestBlock: null, byStatus: {} },
         asOfBlock: 12n,
         updatedAt: new Date("2026-06-05T12:00:00.000Z"),
       },
@@ -185,16 +238,16 @@ describe("createIndexerApi", () => {
     const response = await app.request(`/v1/addresses/${alice}/balance`);
     const body = await response.json() as {
       readonly balance: {
-        readonly raw: string;
+        readonly status: string;
         readonly value: string;
-        readonly source: string;
+        readonly confirmed: { readonly raw: string; readonly source: string } | null;
       };
     };
 
     expect(body.balance).toMatchObject({
-      raw: "42000000",
+      status: "exact",
       value: "42.0",
-      source: "derived",
+      confirmed: { raw: "42000000", source: "derived" },
     });
   });
 

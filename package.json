@@ -18,9 +18,11 @@
     "ponder:codegen": "ponder codegen",
     "check": "pnpm run ponder:codegen && pnpm run typecheck && pnpm run lint && pnpm run test",
     "reset:local-db": "rm -rf ./.ponder/pglite",
-    "demo:seed": "node --experimental-strip-types scripts/demo-seed.ts",
-    "demo:delegate": "node --experimental-strip-types scripts/delegate-indexer.ts",
-    "demo:revoke": "node --experimental-strip-types scripts/revoke-indexer.ts"
+    "demo:doctor": "node --env-file=.env.local --experimental-strip-types scripts/demo-doctor.ts",
+    "demo:seed": "node --env-file=.env.local --experimental-strip-types scripts/demo-seed.ts",
+    "demo:delegate": "node --env-file=.env.local --experimental-strip-types scripts/delegate-indexer.ts",
+    "demo:revoke": "node --env-file=.env.local --experimental-strip-types scripts/revoke-indexer.ts",
+    "demo:watch": "node --env-file=.env.local --experimental-strip-types scripts/demo-watch.ts"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.2.13",
@@ -51,6 +53,9 @@
       "@hono/node-server": ">=1.19.13",
       "esbuild": ">=0.25.0",
       "ws": ">=8.20.1"
+    },
+    "patchedDependencies": {
+      "@zama-fhe/sdk@3.1.0-alpha.4": "patches/@zama-fhe__sdk@3.1.0-alpha.4.patch"
     }
   }
 }
