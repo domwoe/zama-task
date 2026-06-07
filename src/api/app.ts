@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Hono } from "hono";
 import { getAddress, isAddress, type Address } from "viem";
 import { z } from "zod";
@@ -60,6 +62,7 @@ const degradedLagBlocks = 20;
 const unhealthyLagBlocks = 1_000;
 const degradedOldestPendingSeconds = 300;
 const unhealthyOldestPendingSeconds = 3_600;
+const openApiYaml = readFileSync(join(process.cwd(), "docs/openapi.yaml"), "utf8");
 const addressParamSchema = z.string().refine(isAddress);
 const transferQuerySchema = z.object({
   cursor: z.string().optional(),
@@ -82,6 +85,10 @@ export const createIndexerApi = (dependencies: IndexerApiDependencies): Hono => 
 
   app.get("/v1/health/live", (context) => {
     return context.json({ status: "live" });
+  });
+
+  app.get("/v1/openapi.yaml", (context) => {
+    return context.text(openApiYaml, 200, { "Content-Type": "application/yaml; charset=utf-8" });
   });
 
   app.get("/v1/token", async (context) => {

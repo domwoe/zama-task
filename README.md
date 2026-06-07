@@ -45,6 +45,13 @@ The API is mounted under `/v1`; the scaffolded liveness endpoint is:
 curl http://localhost:42069/v1/health/live
 ```
 
+The API contract is in [`docs/openapi.yaml`](docs/openapi.yaml) and is also served
+by a running indexer:
+
+```bash
+curl http://localhost:42069/v1/openapi.yaml
+```
+
 ## Sepolia Demo
 
 Use toy Sepolia keys only. `TOKEN_ADDRESS` is the ERC-7984 wrapper watched by the

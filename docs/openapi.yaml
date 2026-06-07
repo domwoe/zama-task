@@ -1,0 +1,419 @@
+openapi: 3.1.0
+info:
+  title: Zama Confidential Indexer API
+  version: 0.1.0
+  summary: Partner-facing read API for one ERC-7984 confidential token.
+  description: >
+    Exposes cleartext-style wallet reads while surfacing confidential amount
+    lifecycle states honestly: decrypted amounts have string values; encrypted,
+    pending, unauthorized, and failed amounts keep raw/value null.
+servers:
+  - url: http://localhost:42069
+paths:
+  /v1/openapi.yaml:
+    get:
+      summary: OpenAPI contract
+      responses:
+        "200":
+          description: This OpenAPI document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+  /v1/health/live:
+    get:
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Process is running.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    const: live
+  /v1/token:
+    get:
+      summary: Token metadata
+      responses:
+        "200":
+          description: Configured ERC-7984 token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Token"
+  /v1/addresses/{address}/balance:
+    get:
+      summary: Cleartext balance for an address
+      parameters:
+        - $ref: "#/components/parameters/Address"
+      responses:
+        "200":
+          description: Balance derived from valued transfers plus pending gaps.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BalanceResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /v1/addresses/{address}/transfers:
+    get:
+      summary: Transfer history for an address
+      parameters:
+        - $ref: "#/components/parameters/Address"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [in, out, self]
+        - name: kind
+          in: query
+          schema:
+            $ref: "#/components/schemas/TransferKind"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/DecryptionStatus"
+      responses:
+        "200":
+          description: Transfer page with cleartext where available.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransferPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/CursorExpired"
+        "413":
+          $ref: "#/components/responses/LimitTooLarge"
+  /v1/transfers/{id}:
+    get:
+      summary: Single transfer by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Transfer id in txHash-logIndex form.
+      responses:
+        "200":
+          description: Transfer row.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Transfer"
+                  - type: object
+                    required: [asOfBlock]
+                    properties:
+                      asOfBlock:
+                        $ref: "#/components/schemas/NullableBlock"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/health:
+    get:
+      summary: Indexer and decryption health
+      responses:
+        "200":
+          description: Healthy or degraded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: Unhealthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+components:
+  parameters:
+    Address:
+      name: address
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Address"
+  responses:
+    BadRequest:
+      description: Invalid address, parameter, or cursor.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    CursorExpired:
+      description: Cursor anchor is no longer available.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    LimitTooLarge:
+      description: Requested limit is above the maximum.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: Unknown route or transfer id.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  schemas:
+    Address:
+      type: string
+      pattern: "^0x[a-fA-F0-9]{40}$"
+    Hex32:
+      type: string
+      pattern: "^0x[a-fA-F0-9]{64}$"
+    NullableBlock:
+      type:
+        - integer
+        - "null"
+      minimum: 0
+    Token:
+      type: object
+      required: [chainId, address, name, symbol, decimals, kind, underlying]
+      properties:
+        chainId:
+          type: integer
+        address:
+          $ref: "#/components/schemas/Address"
+        name:
+          type: string
+        symbol:
+          type: string
+        decimals:
+          type: integer
+          minimum: 0
+        kind:
+          type: string
+          enum: [erc7984, erc7984-erc20-wrapper]
+        underlying:
+          oneOf:
+            - $ref: "#/components/schemas/Address"
+            - type: "null"
+    DecryptionStatus:
+      type: string
+      enum: [decrypted, encrypted, pending, unauthorized, failed]
+    DecryptionSource:
+      type: string
+      enum: [userDecrypt, public, disclosed]
+    TransferKind:
+      type: string
+      enum: [transfer, shield, unshield, disclosure]
+    Amount:
+      type: object
+      required: [status, raw, value, source]
+      properties:
+        status:
+          $ref: "#/components/schemas/DecryptionStatus"
+        raw:
+          type:
+            - string
+            - "null"
+          description: Base-unit integer string; null until decrypted.
+        value:
+          type:
+            - string
+            - "null"
+          description: Human-readable decimal string; null until decrypted.
+        source:
+          $ref: "#/components/schemas/DecryptionSource"
+    Transfer:
+      type: object
+      required: [id, txHash, blockNumber, logIndex, timestamp, from, to, kind, amountHandle, amount]
+      properties:
+        id:
+          type: string
+        txHash:
+          $ref: "#/components/schemas/Hex32"
+        blockNumber:
+          type: integer
+          minimum: 0
+        logIndex:
+          type: integer
+          minimum: 0
+        timestamp:
+          type: string
+          format: date-time
+        from:
+          $ref: "#/components/schemas/Address"
+        to:
+          $ref: "#/components/schemas/Address"
+        direction:
+          type: string
+          enum: [in, out, self]
+        kind:
+          $ref: "#/components/schemas/TransferKind"
+        amountHandle:
+          $ref: "#/components/schemas/Hex32"
+        amount:
+          $ref: "#/components/schemas/Amount"
+    TransferPage:
+      type: object
+      required: [data, page, asOfBlock]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transfer"
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              type:
+                - string
+                - "null"
+            hasMore:
+              type: boolean
+        asOfBlock:
+          $ref: "#/components/schemas/NullableBlock"
+    BalanceTrust:
+      type: string
+      enum: [exact, as_of, unknown]
+    BalanceResponse:
+      type: object
+      required: [address, balance, asOfBlock, asOfTime]
+      properties:
+        address:
+          $ref: "#/components/schemas/Address"
+        balance:
+          type: object
+          required: [status, confirmed, pending, value]
+          properties:
+            status:
+              $ref: "#/components/schemas/BalanceTrust"
+            confirmed:
+              oneOf:
+                - type: object
+                  required: [raw, value, asOfBlock, source]
+                  properties:
+                    raw:
+                      type: string
+                    value:
+                      type: string
+                    asOfBlock:
+                      $ref: "#/components/schemas/NullableBlock"
+                    source:
+                      type: string
+                      enum: [derived, checkpoint]
+                - type: "null"
+            pending:
+              type: object
+              required: [count, inbound, outbound, oldestBlock, byStatus]
+              properties:
+                count:
+                  type: integer
+                  minimum: 0
+                inbound:
+                  type: integer
+                  minimum: 0
+                outbound:
+                  type: integer
+                  minimum: 0
+                oldestBlock:
+                  $ref: "#/components/schemas/NullableBlock"
+                byStatus:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                    minimum: 0
+            value:
+              type:
+                - string
+                - "null"
+        asOfBlock:
+          $ref: "#/components/schemas/NullableBlock"
+        asOfTime:
+          type: string
+          format: date-time
+    Health:
+      type: object
+      required: [status, chainId, token, indexer, decryption]
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        chainId:
+          type: integer
+        token:
+          $ref: "#/components/schemas/Address"
+        indexer:
+          type: object
+          required: [headBlock, indexedBlock, lagBlocks, lagSeconds]
+          properties:
+            headBlock:
+              $ref: "#/components/schemas/NullableBlock"
+            indexedBlock:
+              $ref: "#/components/schemas/NullableBlock"
+            lagBlocks:
+              type:
+                - integer
+                - "null"
+            lagSeconds:
+              type:
+                - integer
+                - "null"
+        decryption:
+          type: object
+          required: [pending, unauthorized, failed, oldestPendingSeconds, lastSuccessAt, breakerState]
+          properties:
+            pending:
+              type: integer
+              minimum: 0
+            unauthorized:
+              type: integer
+              minimum: 0
+            failed:
+              type: integer
+              minimum: 0
+            oldestPendingSeconds:
+              type:
+                - integer
+                - "null"
+            lastSuccessAt:
+              type:
+                - string
+                - "null"
+              format: date-time
+            breakerState:
+              type: string
+              enum: [closed, open, halfOpen]
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
