@@ -8,6 +8,8 @@
 
 **Consequences.** This constrains the choice of API framework (Hono) and database (PostgreSQL/PGLite) since I'd like to minimize dependencies.
 
+This turned out to be a bad decision which cost me quite some time and codex could only fix by patching the sdk. The way that the zama sdk looks up worker threads is not compatible with the Vite SSR enviromnent that poncho uses. See also SDK Feedback.
+
 ---
 
 ## Decision 2 — Architecture: decouple indexing from decryption
@@ -115,13 +117,11 @@ succeeds. The consequences are baked into the drainer:
 2. **Public shield mints** (`source='disclosed'`): a shield has no wrap event, but the
    underlying ERC-20 emits `Transfer(_, wrapper, amount)` in the same tx. If exactly
    one such deposit exists, we convert it via `rate()` and store it (`shieldDisclosedRaw`
-   in `src/balance/rate.ts`); ambiguous cases (0 or >1 deposits) fall back to (3). This
-   avoids forcing a delegation to value an amount that was never secret.
+   in `src/balance/rate.ts`); ambiguous cases (0 or >1 deposits) fall back to (3). This avoids forcing a delegation to value an amount that was never secret.
 3. **Delegated `userDecrypt`** (the `pending` queue, D2/D8): plain
    `ConfidentialTransfer.amount` and any shield that fell back from (2). A delegation
    from either transfer party covers the handle (ERC-7984 `FHE.allow`s both, D6).
 
-We never call `publicDecrypt`.
 
 **Balance is derived locally** from the stored cleartext deltas (a `SUM`, no relayer in
 the read path): a **confirmed** exact figure over the gap-free valued prefix, plus a
@@ -173,63 +173,67 @@ This drives `/health`: `degraded` on soft backlog, `unhealthy` (503) when the br
 
 ## Reflection
 
-The drainer implementation is very noisy; that is, we currently scan all unauthorized records regularly (every 5 seconds) to see whether a delegation has arrived and the decryption process can start. If we run the indexer in the default mode, where all accounts are indexed but we only have a delegation for a tiny fraction of them, we stress the in-memory database quite a lot with superfluous work. An event-driven approach based on delegation events would be cleaner and much more efficient (I have not properly discussed this with Claude).
+The part I trust least under partner load is the decryption drainer. It is correct
+enough for a single demo token, but it is still a single in-process loop sharing
+the Ponder process, PGlite, and the Zama relayer budget. A burst of delegation
+events for holders with long histories would create many retryable decrypt jobs,
+and the first thing to break would be latency: API reads would still work, but
+rows would sit in `pending`/`unauthorized` longer and `/health` would degrade.
+
+I would prove this with a replay test before changing architecture: seed 10k-100k
+encrypted transfers across many holders, emit delegation events in a burst, and
+measure time-to-first-decrypted, time-to-drain, relayer error rate, breaker state,
+and API p95 latency. If those numbers move badly, the next step is not a redesign:
+move the same queue to server Postgres and run one or more dedicated drainer
+processes.
 
 
 ### What I've cut / what still needs to be done
 
-Besides the fix described above:
+1. Balance checkpointing. The API currently derives balances from indexed,
+   valued transfers. That is honest for fresh holders and complete histories, but
+   late `START_BLOCK` holders need an encrypted `confidentialBalanceOf` checkpoint
+   to anchor the absolute balance and detect missed history.
 
-1. Use the encrypted balance endpoint to allow a user to see their balance, even if not all transfers are indexed/decrypted yet. Also use this to uncover discrepancies if there is any chance that we missed an event and therefore derived an incorrect balance.
+2. Batch decryption. The drainer decrypts one handle at a time. That is simple,
+   but inefficient when a new delegation unlocks a long history for one holder.
+   The SDK supports batch-style flows, and that would be my first performance
+   improvement.
 
-2. Leverage batch decryption. We currently call the relayer for every encrypted handle individually. This is particularly inefficient when we get a new delegation for an existing long transfer history.
+3. Revocation. I currently don't track revocations.
 
 ## SDK feedback
 
-- P1: A durable server-side `GenericStorage` implementation (e.g. a Node file, SQL, or Redis adapter). It probably should also be encrypted, since it contains sensitive data. This is particularly important if we want to scale with multiple drainers/decryption workers.
+- P0: Make the Node worker lookup bundler/runtime-safe. `@zama-fhe/sdk/node`
+  currently uses `import.meta.resolve` to locate its worker. In Ponder's Vite SSR
+  runtime that became `__vite_ssr_import_meta__.resolve`, which does not exist.
+  Concrete change: resolve the worker relative to the SDK module URL, or expose a
+  supported `workerUrl`/`createWorker` option. This unblocks indexers and backend
+  frameworks that run code through Vite/Vite Node.
 
-- P2: Rate-limiting has no dedicated error class (we infer 429 from
-`RelayerRequestFailedError.statusCode`), and that error doesn't expose `Retry-After`,
-so we can't honor server backpressure — a `retryAfter`/`retryable` field would fix both.
+- P1: Provide a durable server-side `GenericStorage` adapter, or a documented
+  recipe. Server integrations need to persist keypairs/permits across restarts and
+  possibly across drainer processes. SQL/Redis/file adapters, ideally with guidance
+  on encrypting sensitive entries, would remove a common footgun.
 
-Issues I've encountered:
+- P2: Expose relayer backpressure as first-class data. Today I infer rate limiting
+  from `RelayerRequestFailedError.statusCode === 429`, and I do not get
+  `Retry-After`. A `retryAfter` or `retryable` field would let partner services
+  back off politely instead of guessing.
 
-1. got this while trying to record the screencast. Maybe too little memory?
-
-[EncryptionFailedError]: Encryption failed
-    at zt.encrypt (file:///Users/domwoe/Dev/projects/zama-task/node_modules/.pnpm/@zama-fhe+sdk@3.1.0-alpha.4_ethers@6.16.0_viem@2.52.2_typescript@5.9.3_zod@4.4.3_/node_modules/@zama-fhe/sdk/dist/esm/index.js:1:17029)
-    at async tn.confidentialTransfer (file:///Users/domwoe/Dev/projects/zama-task/node_modules/.pnpm/@zama-fhe+sdk@3.1.0-alpha.4_ethers@6.16.0_viem@2.52.2_typescript@5.9.3_zod@4.4.3_/node_modules/@zama-fhe/sdk/dist/esm/token-Cwqua22I.js:1:10734)
-    at async file:///Users/domwoe/Dev/projects/zama-task/scripts/demo-seed.ts:43:20 {
-  code: 'ENCRYPTION_FAILED',
-  [cause]: Error: Request ENCRYPT timed out after 30000ms
-      at Timeout._onTimeout (file:///Users/domwoe/Dev/projects/zama-task/node_modules/.pnpm/@zama-fhe+sdk@3.1.0-alpha.4_ethers@6.16.0_viem@2.52.2_typescript@5.9.3_zod@4.4.3_/node_modules/@zama-fhe/sdk/dist/esm/worker.base-client-pErLQy-p.js:1:10443)
-      at listOnTimeout (node:internal/timers:605:17)
-      at process.processTimers (node:internal/timers:541:7)
-}
-
-2. The SDK worker lookup did not work when @zama-fhe/sdk/node was loaded through Ponder's Vite SSR runtime:
-
-› 18:08:24.895 INFO  Indexed block chain=sepolia number=11009643 event_count=0 (6ms)
-  [zama-sdk:info] delegated transfer decrypt start {
-    delegator: '0x38976c3179ABC5a95D41dbe8Ca6d44ae716d84F1',
-    encryptedValue: '0xebeac6180f4afa12fe1104a57662db502bc845fe9eff0000000000aa36a70500',
-    tokenAddress: '0x4E7B06D78965594eB5EF5414c357ca21E1554491'
-  }
-  [zama-sdk:warn] delegated transfer decrypt failed {
-    delegator: '0x38976c3179ABC5a95D41dbe8Ca6d44ae716d84F1',
-    encryptedValue: '0xebeac6180f4afa12fe1104a57662db502bc845fe9eff0000000000aa36a70500',
-    error: {
-      name: 'TypeError',
-      message: '__vite_ssr_import_meta__.resolve is not a function'
-    },
-    failure: 'unknown',
-    errorCode: 'UNKNOWN'
-  }
+- P3: Make worker timeouts configurable and easier to diagnose. I hit
+  `EncryptionFailedError` caused by `Request ENCRYPT timed out after 30000ms`
+  while recording the demo (probably too many stuff open on my machine).
 
 ## AI assistance
 
-I used Claude and Codex for research, interactive planning, implementation, and testing. There were quite a few situations where I had to nudge/steer:
+I used Claude and Codex for research, shaping, implementation, debugging, and test
+selection. The useful parts were fast codebase navigation, proposing API shapes,
+and catching TypeScript/test fallout quickly.
 
-- Simplifying the architecture (not going with the full PostgreSQL, Docker, Decryption Worker setup)
-- Correcting fabricated contract/event signatures and fetching the OpenZeppelin ERC-7984 interface.
-- Defining the shape of the balance endpoint was a longer back-and-forth discussion.
+The tools were also confidently wrong in a few places. The most important example:
+they initially suggested fabricated or stale ERC-7984/Zama event signatures. I had
+to stop and verify the actual interfaces before wiring Ponder filters and fixtures.
+They also pushed toward a bigger Postgres/Docker/separate-worker architecture early
+on; I kept the shipped version smaller because the task rewards a runnable
+single-token service more than production operations.

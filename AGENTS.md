@@ -2,18 +2,15 @@
 
 ## Repository Context
 
-- This repository is for a Zama confidential-indexer task. Read `.context/task.md` before shaping implementation, and keep `docs/DECISIONS.md` consistent with meaningful architecture or scope changes.
 - The target artifact is a small TypeScript Node service that indexes one ERC-7984 confidential token contract, preserves undecryptable events, decrypts when entitled, exposes cleartext read APIs, and includes light tests.
 - Do not use production data, real funds, or shared secrets. Use toy values, local/testnet keys, and `.env.example` only.
 
 ## Documentation Lookup
 
-- Use the `ctx7` CLI to fetch current documentation whenever the task asks about a library, framework, SDK, API, CLI tool, or cloud service.
+- Use the `ctx7` CLI to fetch current documentation whenever the task asks about a library, framework, SDK, API, CLI tool, or cloud service. Except `@zama-fhe`
 - First resolve the library with `npx ctx7@latest library <name> "<user's full question>"`; then fetch docs with `npx ctx7@latest docs <libraryId> "<user's full question>"`.
 - Pick the best library match by exact name, description relevance, snippet count, source reputation, and benchmark score. Retry with an alternate name or query if results are clearly wrong.
 - Do not run more than three Context7 commands per question. Do not include secrets in Context7 queries.
-- If Context7 fails with a quota error, tell the user and suggest `npx ctx7@latest login` or setting `CONTEXT7_API_KEY`; do not silently fall back to model memory.
-- Run Context7 outside Codex's default sandbox. If a Context7 command fails with DNS, host resolution, or fetch errors, rerun it outside the sandbox.
 
 ## Constraints
 
@@ -21,7 +18,6 @@
 - For Zama SDK docs, use the `zama-ai/sdk` prerelease branch (https://github.com/zama-ai/sdk/tree/prerelease) and examples; stable public docs may lag the alpha package.
 - Relevant example is https://github.com/zama-ai/sdk/tree/prerelease/examples/node-viem
 - Use `@zama-fhe/sdk`, not the legacy `@zama-fhe/relayer-sdk` except where it appears as a wrapped dependency.
-- Primary environment is **Sepolia + the public Zama Relayer** — the only setup that exercises the indexer's off-chain SDK decryption path end-to-end, including **delegated `userDecrypt`** and the ACL-grant backfill. Scope `zama-ai/forge-fhevm` to Solidity contract-level tests and encrypted-input fixtures only: its `userDecrypt` helper authorizes by direct ACL allow and never honors delegation (`FhevmTest.sol:317-333`), and it exposes no relayer a Node service can call. See `docs/DECISIONS.md` Decision 5.
 
 ## TypeScript Workflow
 

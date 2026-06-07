@@ -49,7 +49,7 @@ it is still encrypted*. That single addition is surfaced honestly and never fake
   "status": "decrypted",   // decrypted | encrypted | pending | unauthorized | failed
   "raw": "10000000",       // base-unit string; null unless status=decrypted
   "value": "10.0",         // human-readable string; null unless status=decrypted
-  "source": "userDecrypt"  // userDecrypt | public | disclosed
+  "source": "userDecrypt"  // userDecrypt | disclosed
 }
 ```
 
@@ -63,9 +63,9 @@ it is still encrypted*. That single addition is surfaced honestly and never fake
 | `unauthorized` | tried, no delegation yet | null | **no** (retryable — backfill flips it) |
 | `failed` | decrypt failed or returned a malformed result; surfaced while retrying slowly | null | **no** (slow retry) |
 
-`source` is the Decision 7 provenance: `userDecrypt` (delegated decryption),
-`public` (shield amount known from chain), `disclosed` (`AmountDisclosed` /
-`UnwrapFinalized` cleartext).
+`source` is the Decision 7 provenance: `userDecrypt` (delegated decryption) or
+`disclosed` (cleartext available from public-chain data, including
+`AmountDisclosed`, `UnwrapFinalized`, and unambiguous shield deposits).
 
 ## Endpoints
 
