@@ -21,6 +21,9 @@ importers:
       '@zama-fhe/sdk':
         specifier: ^3.1.0-alpha.4
         version: 3.1.0-alpha.4(patch_hash=ef01b8c8565b5e020c6ac7e32e7735b3667c2add57682a592832d9698e08da72)(ethers@6.16.0)(viem@2.52.2(typescript@5.9.3)(zod@4.4.3))
+      drizzle-orm:
+        specifier: 0.41.0
+        version: 0.41.0(@electric-sql/pglite@0.2.13)(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(kysely@0.26.3)(pg@8.21.0)
       hono:
         specifier: ^4.12.23
         version: 4.12.23

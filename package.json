@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@zama-fhe/sdk": "^3.1.0-alpha.4",
+    "drizzle-orm": "0.41.0",
     "hono": "^4.12.23",
     "ponder": "^0.16.6",
     "viem": "^2.52.2",
